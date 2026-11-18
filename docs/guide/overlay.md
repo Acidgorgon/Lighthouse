@@ -7,14 +7,14 @@ The overlay is an in-game panel with Lighthouse's live numbers. It is built from
 
 | Input | Action |
 |---|---|
-| **F7** | toggle (keyboard; change it with `overlayKey`) |
+| **F8** | toggle (keyboard; change it with `overlayKey`) |
 | **L3 + R3** | toggle: press both thumbsticks together (change it with `overlayGamepad`) |
 | **x** button | close |
 | `Lighthouse.overlay(true \| false \| nil)` | show, hide or toggle from code |
 
 ```lua
 Lighthouse.start({
-	overlayKey = Enum.KeyCode.F8,                                     -- or false for no key
+	overlayKey = Enum.KeyCode.F8,                                     -- the default; or false for no key
 	overlayGamepad = { Enum.KeyCode.ButtonL3, Enum.KeyCode.ButtonR3 }, -- or false
 })
 ```

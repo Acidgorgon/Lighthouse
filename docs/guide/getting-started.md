@@ -58,7 +58,7 @@ Lighthouse.start()
 :::
 
 That already gives you frame time, frame percentiles, engine numbers (heartbeat, physics, network
-kbps, instance count, ping) and memory by tag. Press **F7** in Studio to see them.
+kbps, instance count, ping) and memory by tag. Press **F8** in Studio to see them.
 
 Options go in the same call. All are optional; see [the API reference](/reference/api#options):
 
@@ -97,7 +97,7 @@ Open the overlay, go to **Probes**, and `Crowd.Step` is there with its time per 
 
 | Input | Action |
 |---|---|
-| **F7** | toggle (keyboard) |
+| **F8** | toggle (keyboard) |
 | **L3 + R3** | toggle (press both thumbsticks on a controller) |
 | **LB / RB** | previous / next tab while open |
 | `Lighthouse.overlay()` | toggle from code |

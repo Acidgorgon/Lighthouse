@@ -273,13 +273,13 @@ return function(T)
 		T.check(st[1] and st[2] and st[3], "everyone in Studio")
 	end)
 
-	T.test("overlay toggle: F7 and L3+R3 for viewers only, bye stops the stream", function()
+	T.test("overlay toggle: F8 and L3+R3 for viewers only, bye stops the stream", function()
 		local world, server, clients = setup(2)
 		run(world, 0.5)
 		local viewer, other = clients[1], clients[2]
 		local KeyCode = Enum.KeyCode
 
-		Mock.press(viewer.env, KeyCode.F7)
+		Mock.press(viewer.env, KeyCode.F8)
 		T.eq(viewer.overlay.created, 0, "live game: waits for the server's answer")
 		run(world, 0.2)
 		T.eq(viewer.overlay.created, 1, "opened after the server allowed it")
@@ -289,7 +289,7 @@ return function(T)
 		T.check(viewer.overlay.last.source("server") ~= nil, "overlay source has the server snapshot")
 		T.eq(viewer.overlay.last.source("client").side, "client")
 
-		Mock.press(other.env, KeyCode.F7)
+		Mock.press(other.env, KeyCode.F8)
 		run(world, 6)
 		T.eq(other.overlay.created, 0, "non-viewer cannot open it")
 		T.eq(other.rt.Client.state().allowed, false)
@@ -318,9 +318,14 @@ return function(T)
 		run(world, 1)
 		T.eq(#server.rt.Server.viewers(), 0, "bye after closing from the panel")
 
-		-- in Studio everyone opens at once
+		-- in Studio everyone opens at once. F7 (the 0.1.0 default) does nothing now, and neither does a
+		-- processed F8 (Roblox marks F7 processed, which is why the default moved)
 		world.lh.studio = true
 		Mock.press(other.env, KeyCode.F7)
+		T.eq(other.overlay.created, 0, "F7 is not the toggle")
+		Mock.press(other.env, KeyCode.F8, false, true)
+		T.eq(other.overlay.created, 0, "processed input does not toggle")
+		Mock.press(other.env, KeyCode.F8)
 		T.eq(other.overlay.created, 1, "Studio: opens immediately")
 		other.lh.stop()
 		T.check(other.overlay.last.destroyed, "stop destroys the overlay")

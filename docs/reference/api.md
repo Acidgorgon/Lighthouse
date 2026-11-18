@@ -29,7 +29,7 @@ previous ones and applies them. Returns `true` when Lighthouse is on, `false` wh
 | `frames` | number | `600` | both | frames kept in the history ring |
 | `microprofiler` | boolean | `RunService:IsStudio()` | both | also call `debug.profilebegin` / `profileend` with each probe's name |
 | `viewers` | function or table | creator | server | who may see server numbers and open the overlay in live games: `function(player): boolean`, a list of user ids, or `{ group = id, rank = n }`. Everyone in Studio |
-| `overlayKey` | `Enum.KeyCode` or `false` | `F7` | client | keyboard toggle |
+| `overlayKey` | `Enum.KeyCode` or `false` | `F8` | client | keyboard toggle |
 | `overlayGamepad` | `{ KeyCode, KeyCode }` or `false` | `{ ButtonL3, ButtonR3 }` | client | press both to toggle |
 | `telemetry` | boolean or table | `false` | server | `true` or `{ sample = 0.1, every = 60, analytics = true, http = nil }`, see [telemetry](/guide/telemetry) |
 | `stream` | number | `1` | server | seconds between server snapshots sent to viewers |

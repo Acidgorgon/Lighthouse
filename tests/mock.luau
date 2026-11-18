@@ -1599,9 +1599,9 @@ function Mock.extendLighthouse()
 end
 
 -- Presses (and releases) a key or gamepad button on a client.
-function Mock.press(client, keyCode, hold: boolean?)
+function Mock.press(client, keyCode, hold: boolean?, processed: boolean?)
 	local uis = client.UserInputService
-	uis.InputBegan:_fire({ KeyCode = keyCode, UserInputType = "Keyboard" }, false)
+	uis.InputBegan:_fire({ KeyCode = keyCode, UserInputType = "Keyboard" }, processed == true)
 	if not hold then
 		uis.InputEnded:_fire({ KeyCode = keyCode, UserInputType = "Keyboard" })
 	end

@@ -27,7 +27,7 @@ Lighthouse.count("Pathfinds")       -- per second
 Lighthouse.gauge("Npcs", #npcs)     -- last value
 ```
 
-Press **F7** (or **L3 + R3** on a controller) to open the overlay.
+Press **F8** (or **L3 + R3** on a controller) to open the overlay.
 
 It is part of **Harbor**, a family of Roblox libraries: **Current** (networking), **Ripple** (state
 sync), **Anchor** (saving), **Tide** (motion) and **Lighthouse** (profiling).

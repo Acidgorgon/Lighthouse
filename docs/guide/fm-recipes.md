@@ -6,7 +6,7 @@ budget is 16.7 ms. Where do the 60 ms go? Follow these steps in order; each one 
 ## 1. Measure the frame as it is
 
 Start Lighthouse on both sides with no probes yet, play on the device, and open the overlay
-(L3 + R3 on a controller, F7 on a keyboard). On the **Frame** tab note:
+(L3 + R3 on a controller, F8 on a keyboard). On the **Frame** tab note:
 
 - **p50, p95, p99.** A high p50 means every frame is slow (steady work). A fine p50 with a bad p99
   means spikes: look at the flares instead.

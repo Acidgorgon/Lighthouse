@@ -24,7 +24,7 @@ local SIDE = if IS_SERVER then "server" else "client"
 
 local Lighthouse = {}
 
-Lighthouse.version = "0.1.0"
+Lighthouse.version = "0.1.1"
 Lighthouse.isServer = IS_SERVER
 Lighthouse.Core = Core
 
