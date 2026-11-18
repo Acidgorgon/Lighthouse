@@ -6,7 +6,7 @@
 --     says BYE when nothing needs the stream any more
 --   * decodes the name table and server snapshots (last one kept for serverSnapshot())
 --   * sends telemetry reports when sampled (Telemetry.clientTick)
---   * owns the overlay toggle: F7, L3+R3 together on a gamepad, or Runtime.overlay();
+--   * owns the overlay toggle: F8, L3+R3 together on a gamepad, or Runtime.overlay();
 --     in live games only after the server allowed this player (HELLO reply), in Studio always
 
 local Wire = require(script.Parent.Wire)
@@ -316,7 +316,9 @@ local function onInputEnded(input: any)
 end
 
 local function bindInput()
-	keyCode = if opts.overlayKey == false then nil else (opts.overlayKey or enumKey("F7"))
+	-- F8, not F7: Roblox marks F7 as game-processed (FM Studio test, 2026-11-18), and the toggle ignores processed
+	-- input so typing in chat never opens the panel, so an F7 default never opened it.
+	keyCode = if opts.overlayKey == false then nil else (opts.overlayKey or enumKey("F8"))
 	local pad = opts.overlayGamepad
 	if pad == false then
 		padA, padB = nil, nil

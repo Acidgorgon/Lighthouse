@@ -100,7 +100,7 @@ Names are interned once; a probe is a small object with an integer id.
 | `frames` | `600` | frames kept in the ring |
 | `microprofiler` | `RunService:IsStudio()` | also call debug.profilebegin/end |
 | `viewers` | creator + Studio | server: `function(player): boolean` or a list of UserIds / group `{ group = id, rank = n }` allowed to see server numbers and open the overlay in live games |
-| `overlayKey` | `Enum.KeyCode.F7` | keyboard toggle |
+| `overlayKey` | `Enum.KeyCode.F8` | keyboard toggle |
 | `overlayGamepad` | `{ ButtonL3, ButtonR3 }` | press both to toggle (controller players) |
 | `telemetry` | `false` | `true` or a table: `{ sample = 0.1, every = 60, analytics = true, http = nil }` |
 | `stream` | `1` | seconds between server snapshot sends to viewers |
@@ -246,7 +246,7 @@ or hidden on close, updated at 4 Hz (never per frame). Tabs: **Frame** (frame-ti
 script vs frame, flares list), **Probes** (top self time, grouped by dot prefix, client | server toggle),
 **Network** (channels by lib, in/out bytes/s), **Memory** (tags, Luau heap and garbage rate), **Players**
 (server: telemetry by device class). Works with keyboard, mouse, touch and gamepad (tabs selectable with
-the D-pad, LB/RB switch tab). Toggle: F7, or L3+R3 together on a gamepad, or `Lighthouse.overlay()`.
+the D-pad, LB/RB switch tab). Toggle: F8, or L3+R3 together on a gamepad, or `Lighthouse.overlay()`.
 Only viewers (see `viewers`) can open it in live games; in Studio everyone can.
 
 ## Library hooks (Current, Ripple, Tide)
