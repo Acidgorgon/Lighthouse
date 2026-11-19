@@ -170,6 +170,8 @@ Every second (pcall'd, missing properties skipped, each read wrapped so a rename
   `PhysicsSendKbps`, `InstanceCount`, `PrimitivesCount`, `MovingPrimitivesCount`, `ContactsCount`,
   `GetTotalMemoryUsageMb()`, `GetMemoryUsageMbForTag` for LuaHeap, Script, Instances, PhysicsCollision,
   PhysicsParts, GraphicsTexture, GraphicsMeshParts, Animation, Gui, Sounds, Navigation (whatever exists).
+  The two memory calls run only while `Stats.MemoryTrackingEnabled` is true: on live clients it is usually false,
+  and every call then prints "Memory tracking is currently disabled" to the console (12 warnings a second).
 - `gcinfo()` (Luau heap KB) and its per-second growth (garbage rate, a big CPU hint).
 - client: `Players.LocalPlayer:GetNetworkPing()`, `workspace:GetRealPhysicsFPS()`, camera/quality where readable
   (`UserSettings().GameSettings.SavedQualityLevel` in pcall), device class.

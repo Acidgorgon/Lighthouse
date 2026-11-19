@@ -29,7 +29,7 @@ costs nothing.
 | **Frame** | last, p50, p95 and p99 frame time, fps, script time against frame time, a graph of the last 120 frames, and the newest flares with their slowest probes |
 | **Probes** | probes by self time, grouped by dot prefix (self ms, p95, total, calls per frame), then counters and gauges |
 | **Network** | channels grouped by library: bytes per second, packets per second, average packet size, 10 s peak; engine receive and send rates and ping |
-| **Memory** | total memory, Luau heap, garbage rate (KB/s), instance count, and memory by tag |
+| **Memory** | total memory, Luau heap, garbage rate (KB/s), instance count, and memory by tag (total and tags only where `Stats.MemoryTrackingEnabled` is on, usually Studio; elsewhere the heap comes from `gcinfo()`) |
 | **Players** | [player telemetry](/guide/telemetry) by device class: players, frame p50/p95/p99, script p50, memory, ping, top probes |
 
 Frame graph colours: **green** within budget, **amber** up to twice the budget, **red** beyond. The
