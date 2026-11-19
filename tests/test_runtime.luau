@@ -183,6 +183,28 @@ return function(T)
 		T.eq(#world.warnings, 0, "no warnings: " .. table.concat(world.warnings, "; "))
 	end)
 
+	T.test("memory calls are skipped while Stats.MemoryTrackingEnabled is false (no live warning spam)", function()
+		local world, server = setup(1, nil, function(world)
+			world.lh.stats.MemoryTrackingEnabled = false
+		end)
+		run(world, 5.5)
+		local Sampler = module(world.server, world.lighthouseModule, "Runtime", "Sampler")
+		T.eq(world.lh.statsReads.GetMemoryUsageMbForTag, nil, "no tag reads while tracking is off")
+		T.eq(world.lh.statsReads.GetTotalMemoryUsageMb, nil, "no total read while tracking is off")
+		T.check(Sampler.reads.MemoryTrackingEnabled >= 5, "the flag is checked every sample")
+		local s = server.core.snapshot("server")
+		T.eq(s.memory.totalMb, nil)
+		T.check(next(s.memory.tags) == nil, "no tags")
+		T.check(s.memory.luaHeapMb > 0, "heap falls back to gcinfo")
+		-- tracking switched on later: the reads start on the next sample
+		world.lh.stats.MemoryTrackingEnabled = true
+		run(world, 1.5)
+		s = server.core.snapshot("server")
+		T.eq(s.memory.totalMb, 512)
+		T.eq(s.memory.tags.LuaHeap, 11)
+		T.eq(#world.warnings, 0, "no warnings: " .. table.concat(world.warnings, "; "))
+	end)
+
 	T.test("server streams to viewers that said hello, never to others", function()
 		-- player 1 (UserId 1001) is the game's creator
 		local world, server, clients = setup(2, { stream = 1 })

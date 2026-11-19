@@ -6,7 +6,7 @@
 --   client: RenderStepped dt -> Core.endFrame (frame time), Heartbeat dt kept as heartbeatDtMs
 --   server: Heartbeat dt -> Core.endFrame
 --   gcinfo() delta (positive part) accumulated as the garbage rate
--- Every second: Stats service properties, memory tags, ping, physics fps, quality level,
+-- Every second: Stats service properties, memory tags (only while Stats.MemoryTrackingEnabled), ping, physics fps, quality level,
 -- player count -> Core.setEngine(engine, memory, extra).
 --
 -- Every engine read is pcall'd. A property or method that errors (or is not a number) on
@@ -170,6 +170,24 @@ local function quality(): number?
 	return nil
 end
 
+-- Stats.MemoryTrackingEnabled: false only when the engine says so. A missing or non-boolean property reads as on
+-- (older engines and the test mock have no such property and their memory calls work).
+local function memoryTracking(stats: any): boolean
+	if stats == nil or supported.MemoryTrackingEnabled == false then
+		return true
+	end
+	count("MemoryTrackingEnabled")
+	local ok, v = pcall(getProp, stats, "MemoryTrackingEnabled")
+	if ok and type(v) == "boolean" then
+		supported.MemoryTrackingEnabled = true
+		return v
+	end
+	if supported.MemoryTrackingEnabled == nil then
+		supported.MemoryTrackingEnabled = false
+	end
+	return true
+end
+
 -- workspace:GetServerTimeNow(), or 0 when it is missing.
 function Sampler.serverTime(): number
 	return readCall(workspace, "GetServerTimeNow", nil, "GetServerTimeNow") or 0
@@ -215,11 +233,19 @@ function Sampler.sample(now: number): (any, any, any)
 		memory.gcKbPerSec = 0
 	end
 	gcAlloc = 0
-	local total = readCall(stats, "GetTotalMemoryUsageMb", nil, "GetTotalMemoryUsageMb")
+	-- Stats.MemoryTrackingEnabled is false on live clients unless the place turns it on. Every memory call then
+	-- prints "Memory tracking is currently disabled..." (12 warnings a second in the F9 console, which costs frame
+	-- time of its own) while still returning a number, so the supported cache never stops them. Skip the memory
+	-- calls while tracking is off; it is checked again every sample. Lua heap falls back to gcinfo().
+	local tracking = memoryTracking(stats)
+	memory.tracking = tracking
+	local total = if tracking
+		then readCall(stats, "GetTotalMemoryUsageMb", nil, "GetTotalMemoryUsageMb")
+		else nil
 	if total ~= nil then
 		memory.totalMb = total
 	end
-	for _, tag in Sampler.MEMORY_TAGS do
+	for _, tag in if tracking then Sampler.MEMORY_TAGS else {} do
 		local key = "tag:" .. tag
 		if supported[key] ~= false then
 			local e = tagEnum(tag)
