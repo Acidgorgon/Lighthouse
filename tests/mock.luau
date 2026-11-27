@@ -1315,7 +1315,8 @@ end
 -- Per-world knobs live in world.lh (read at access time, so tests can change them):
 --   studio, creatorId, creatorType ("User" | "Group"), placeId, ranks[userId],
 --   statsMissing[name] = true, stats[name] = value, analyticsFail, httpFail,
---   devices[clientIndex] = { touch, keyboard, tenFoot, vr, viewport = {x, y}, ping }
+--   devices[clientIndex] = { touch, keyboard, tenFoot, vr, viewport = {x, y}, ping,
+--     focusedTextBox (what UserInputService:GetFocusedTextBox() returns) }
 --------------------------------------------------------------------------------
 
 local lhExtended = false
@@ -1417,7 +1418,7 @@ function Mock.extendLighthouse()
 	end
 	lhExtended = true
 
-	Enum.KeyCode = lhEnumItems("KeyCode", { "F7", "F8", "ButtonL3", "ButtonR3", "ButtonA", "Unknown" })
+	Enum.KeyCode = lhEnumItems("KeyCode", { "F7", "F8", "Semicolon", "ButtonL3", "ButtonR3", "ButtonA", "Unknown" })
 	Enum.CreatorType = lhEnumItems("CreatorType", { "User", "Group" })
 	Enum.DeveloperMemoryTag = lhEnumItems("DeveloperMemoryTag", {
 		"LuaHeap",
@@ -1544,6 +1545,10 @@ function Mock.extendLighthouse()
 				return d.tenFoot == true
 			elseif key == "MouseEnabled" then
 				return d.touch ~= true
+			elseif key == "GetFocusedTextBox" then
+				return function()
+					return device().focusedTextBox
+				end
 			end
 			return nil
 		end)

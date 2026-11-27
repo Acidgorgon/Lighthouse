@@ -6,7 +6,7 @@
 --     says BYE when nothing needs the stream any more
 --   * decodes the name table and server snapshots (last one kept for serverSnapshot())
 --   * sends telemetry reports when sampled (Telemetry.clientTick)
---   * owns the overlay toggle: F8, L3+R3 together on a gamepad, or Runtime.overlay();
+--   * owns the overlay toggle: the `;` key, L3+R3 together on a gamepad, or Runtime.overlay();
 --     in live games only after the server allowed this player (HELLO reply), in Studio always
 
 local Wire = require(script.Parent.Wire)
@@ -44,6 +44,7 @@ local overlay: any = nil
 local overlayVisible = false
 local overlayFailed = false
 
+local inputService: any = nil
 local keyCode: any = nil
 local padA: any = nil
 local padB: any = nil
@@ -281,11 +282,21 @@ end
 -- Input
 --------------------------------------------------------------------------------
 
-local function enumKey(name: string): any
+local function enumItem(enum: string, name: string): any
 	local ok, v = pcall(function()
-		return (Enum :: any).KeyCode[name]
+		return (Enum :: any)[enum][name]
 	end)
 	return if ok then v else nil
+end
+
+-- A TextBox has the keyboard (chat, a search field of the game). The engine marks those key presses as
+-- processed; asking for the focused box as well covers a press that arrives unmarked.
+local function typing(): boolean
+	if inputService == nil then
+		return false
+	end
+	local ok, box = pcall(inputService.GetFocusedTextBox, inputService)
+	return ok and box ~= nil
 end
 
 local function onInputBegan(input: any, processed: boolean)
@@ -294,7 +305,7 @@ local function onInputBegan(input: any, processed: boolean)
 		return
 	end
 	if keyCode ~= nil and kc == keyCode then
-		if not processed then
+		if not processed and not typing() then
 			Client.overlay(nil)
 		end
 		return
@@ -316,16 +327,18 @@ local function onInputEnded(input: any)
 end
 
 local function bindInput()
-	-- F8, not F7: Roblox marks F7 as game-processed (FM Studio test, 2026-11-18), and the toggle ignores processed
-	-- input so typing in chat never opens the panel, so an F7 default never opened it.
-	keyCode = if opts.overlayKey == false then nil else (opts.overlayKey or enumKey("F8"))
+	-- Semicolon, not a function key. Studio takes F5 (Play), F7 (Start: the engine marks it processed, so the
+	-- first default never opened the panel), F8 (Run), F11 and F12; the client takes F9 (console) to F12.
+	-- Roblox leaves `;` alone on both (chat is `/`, the backpack the backtick, emotes `.`, UI selection the
+	-- backslash), and a press while typing is ignored (see onInputBegan).
+	keyCode = if opts.overlayKey == false then nil else (opts.overlayKey or enumItem("KeyCode", "Semicolon"))
 	local pad = opts.overlayGamepad
 	if pad == false then
 		padA, padB = nil, nil
 	elseif type(pad) == "table" and pad[1] ~= nil and pad[2] ~= nil then
 		padA, padB = pad[1], pad[2]
 	else
-		padA, padB = enumKey("ButtonL3"), enumKey("ButtonR3")
+		padA, padB = enumItem("KeyCode", "ButtonL3"), enumItem("KeyCode", "ButtonR3")
 	end
 	if #connections > 0 then
 		return
@@ -334,6 +347,7 @@ local function bindInput()
 	if uis == nil then
 		return
 	end
+	inputService = uis
 	pcall(function()
 		table.insert(connections, uis.InputBegan:Connect(function(input, processed)
 			pcall(onInputBegan, input, processed)

@@ -295,13 +295,13 @@ return function(T)
 		T.check(st[1] and st[2] and st[3], "everyone in Studio")
 	end)
 
-	T.test("overlay toggle: F8 and L3+R3 for viewers only, bye stops the stream", function()
+	T.test("overlay toggle: the key and L3+R3 for viewers only, bye stops the stream", function()
 		local world, server, clients = setup(2)
 		run(world, 0.5)
 		local viewer, other = clients[1], clients[2]
 		local KeyCode = Enum.KeyCode
 
-		Mock.press(viewer.env, KeyCode.F8)
+		Mock.press(viewer.env, KeyCode.Semicolon)
 		T.eq(viewer.overlay.created, 0, "live game: waits for the server's answer")
 		run(world, 0.2)
 		T.eq(viewer.overlay.created, 1, "opened after the server allowed it")
@@ -311,7 +311,7 @@ return function(T)
 		T.check(viewer.overlay.last.source("server") ~= nil, "overlay source has the server snapshot")
 		T.eq(viewer.overlay.last.source("client").side, "client")
 
-		Mock.press(other.env, KeyCode.F8)
+		Mock.press(other.env, KeyCode.Semicolon)
 		run(world, 6)
 		T.eq(other.overlay.created, 0, "non-viewer cannot open it")
 		T.eq(other.rt.Client.state().allowed, false)
@@ -340,17 +340,62 @@ return function(T)
 		run(world, 1)
 		T.eq(#server.rt.Server.viewers(), 0, "bye after closing from the panel")
 
-		-- in Studio everyone opens at once. F7 (the 0.1.0 default) does nothing now, and neither does a
-		-- processed F8 (Roblox marks F7 processed, which is why the default moved)
+		-- in Studio everyone opens at once
 		world.lh.studio = true
-		Mock.press(other.env, KeyCode.F7)
-		T.eq(other.overlay.created, 0, "F7 is not the toggle")
-		Mock.press(other.env, KeyCode.F8, false, true)
-		T.eq(other.overlay.created, 0, "processed input does not toggle")
-		Mock.press(other.env, KeyCode.F8)
+		Mock.press(other.env, KeyCode.Semicolon)
 		T.eq(other.overlay.created, 1, "Studio: opens immediately")
 		other.lh.stop()
 		T.check(other.overlay.last.destroyed, "stop destroys the overlay")
+	end)
+
+	T.test("overlay key: `;` by default, never while typing, overlayKey still picks any key", function()
+		local world, _, clients = setup(3, nil, function(world)
+			world.lh.studio = true
+		end)
+		local KeyCode = Enum.KeyCode
+		local c = clients[1]
+		local function visible(client)
+			return client.overlay.last ~= nil and client.overlay.last.visible
+		end
+
+		-- the earlier defaults are Studio's own keys (F7 Start, F8 Run): they do nothing now
+		Mock.press(c.env, KeyCode.F7)
+		Mock.press(c.env, KeyCode.F8)
+		T.eq(c.overlay.created, 0, "F7 and F8 are not the toggle")
+
+		-- typing: the engine marks the press as processed (chat, a TextBox of the game)
+		Mock.press(c.env, KeyCode.Semicolon, false, true)
+		T.eq(c.overlay.created, 0, "a processed `;` does not toggle")
+		-- a TextBox has the keyboard although the press came unmarked
+		world.lh.devices[1] = { focusedTextBox = {} }
+		Mock.press(c.env, KeyCode.Semicolon)
+		T.eq(c.overlay.created, 0, "`;` typed into a focused TextBox does not toggle")
+		world.lh.devices[1] = nil
+
+		Mock.press(c.env, KeyCode.Semicolon)
+		T.check(visible(c), "`;` opens")
+		world.lh.devices[1] = { focusedTextBox = {} }
+		Mock.press(c.env, KeyCode.Semicolon)
+		T.check(visible(c), "and does not close while typing either")
+		world.lh.devices[1] = nil
+		Mock.press(c.env, KeyCode.Semicolon)
+		T.check(not visible(c), "`;` closes")
+
+		-- a game that passes its own key keeps it
+		local own = clients[2]
+		own.lh.start({ overlayKey = KeyCode.F8 })
+		Mock.press(own.env, KeyCode.Semicolon)
+		T.eq(own.overlay.created, 0, "the default key is replaced")
+		Mock.press(own.env, KeyCode.F8, false, true)
+		T.eq(own.overlay.created, 0, "processed input does not toggle")
+		Mock.press(own.env, KeyCode.F8)
+		T.check(visible(own), "overlayKey = F8 still toggles")
+
+		-- and no key at all
+		local none = clients[3]
+		none.lh.start({ overlayKey = false })
+		Mock.press(none.env, KeyCode.Semicolon)
+		T.eq(none.overlay.created, 0, "overlayKey = false: no keyboard toggle")
 	end)
 
 	T.test("overlay: the real Overlay module opens with live numbers; a missing one is contained", function()
