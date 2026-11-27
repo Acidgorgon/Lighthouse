@@ -6,8 +6,15 @@
 --     says BYE when nothing needs the stream any more
 --   * decodes the name table and server snapshots (last one kept for serverSnapshot())
 --   * sends telemetry reports when sampled (Telemetry.clientTick)
---   * owns the overlay toggle: the `;` key, L3+R3 together on a gamepad, or Runtime.overlay();
---     in live games only after the server allowed this player (HELLO reply), in Studio always
+--   * owns the overlay toggle: the `;` key, hold R3 and press D-pad Left on a gamepad, or
+--     Runtime.overlay(); in live games only after the server allowed this player (HELLO reply),
+--     in Studio always
+--
+-- Gamepad: Lighthouse listens only while a combo button is held. The first button of the combo
+-- to go down is watched through UserInputService and left to the game (a press cannot be taken
+-- back once the combo is known). While it is held the other button is bound through
+-- ContextActionService at overlayGamepadPriority and sunk, so whatever the game binds to it
+-- does not fire. Nothing is bound for a player who may not open the overlay.
 
 local Wire = require(script.Parent.Wire)
 local Telemetry = require(script.Parent.Telemetry)
@@ -16,6 +23,8 @@ local Client = {}
 
 local PENDING_TIMEOUT = 5 -- seconds to wait for the server's answer to HELLO
 local FIND_EVERY = 1 -- seconds between looks for the remote
+local PAD_ACTION = "LighthouseOverlay"
+local PAD_PRIORITY = 3000 -- Enum.ContextActionPriority.High.Value
 
 local Core: any = nil
 local opts: any = {}
@@ -46,9 +55,17 @@ local overlayFailed = false
 
 local inputService: any = nil
 local keyCode: any = nil
-local padA: any = nil
-local padB: any = nil
-local padDown: { [any]: boolean } = {}
+local padHold: any = nil -- overlayGamepad[1]
+local padPress: any = nil -- overlayGamepad[2]
+local padPriority = PAD_PRIORITY
+local padWatch: { [any]: boolean } = {} -- buttons followed through UserInputService
+local padDown: { [any]: any } = {} -- watched button -> the gamepad (UserInputType) that holds it
+local padAnchor: any = nil -- the combo button that went down first; set while the action is bound
+local padSunk: { [any]: boolean } = {} -- presses taken from the game (their releases are taken too)
+local stateBegin: any = nil
+local stateEnd: any = nil
+local resultSink: any = nil
+local resultPass: any = nil
 
 Client.counters = { bad = 0, snapshots = 0, names = 0, hellos = 0, byes = 0 }
 
@@ -299,6 +316,81 @@ local function typing(): boolean
 	return ok and box ~= nil
 end
 
+-- nil when the engine cannot say (then the InputBegan / InputEnded bookkeeping is trusted)
+local function buttonDown(pad: any, kc: any): boolean?
+	if inputService == nil or pad == true then
+		return nil
+	end
+	local ok, down = pcall(inputService.IsGamepadButtonDown, inputService, pad, kc)
+	if ok and type(down) == "boolean" then
+		return down
+	end
+	return nil
+end
+
+local function unbindPad()
+	if padAnchor == nil then
+		return
+	end
+	padAnchor = nil
+	table.clear(padSunk)
+	local cas = getService("ContextActionService")
+	if cas ~= nil then
+		pcall(cas.UnbindAction, cas, PAD_ACTION)
+	end
+end
+
+-- The gamepad went away or the window lost focus: releases may never arrive.
+local function resetPad()
+	table.clear(padDown)
+	unbindPad()
+end
+
+-- Bound while a combo button is held. Returns Pass for everything that is not ours, so the game
+-- keeps its input; a press that toggles is sunk together with its release.
+local function onPadAction(_name: string, state: any, input: any): any
+	local kc = input and input.KeyCode
+	if kc == nil then
+		return resultPass
+	end
+	if state == stateBegin then
+		local anchor = padAnchor
+		local pad = anchor ~= nil and padDown[anchor]
+		if not pad or (pad ~= true and input.UserInputType ~= nil and input.UserInputType ~= pad) then
+			return resultPass -- the held button is up again, or this press is from another gamepad
+		end
+		if kc ~= (if anchor == padHold then padPress else padHold) or typing() then
+			return resultPass
+		end
+		padSunk[kc] = true
+		padDown[kc] = pad
+		Client.overlay(nil)
+		return resultSink
+	end
+	if padSunk[kc] then
+		if state == stateEnd then
+			padSunk[kc] = nil
+			padDown[kc] = nil
+		end
+		return resultSink
+	end
+	return resultPass
+end
+
+local function bindPad(anchor: any): boolean
+	local cas = getService("ContextActionService")
+	if cas == nil or stateBegin == nil or stateEnd == nil or resultSink == nil or resultPass == nil then
+		return false
+	end
+	padAnchor = anchor
+	local other = if anchor == padHold then padPress else padHold
+	local ok = pcall(cas.BindActionAtPriority, cas, PAD_ACTION, onPadAction, false, padPriority, other)
+	if not ok then
+		padAnchor = nil
+	end
+	return ok
+end
+
 local function onInputBegan(input: any, processed: boolean)
 	local kc = input.KeyCode
 	if kc == nil then
@@ -310,36 +402,103 @@ local function onInputBegan(input: any, processed: boolean)
 		end
 		return
 	end
-	if padA ~= nil and (kc == padA or kc == padB) then
-		local wasBoth = padDown[padA] and padDown[padB]
-		padDown[kc] = true
-		if not wasBoth and padDown[padA] and padDown[padB] then
+	if not padWatch[kc] then
+		return
+	end
+	-- held or not is a fact about the button: a press the game or the engine processed still counts
+	local wasDown = padDown[kc] ~= nil
+	padDown[kc] = input.UserInputType or true
+	if wasDown or padAnchor ~= nil then
+		return -- while bound, onPadAction owns the combo
+	end
+	if padDown[if kc == padHold then padPress else padHold] ~= nil then
+		-- both are down and nothing was bound: this player may not open the overlay (or the
+		-- service is missing), so nothing is taken from the game. Ask anyway: a viewer's first
+		-- press in a live game is how the server gets to allow it.
+		if not typing() then
 			Client.overlay(nil)
 		end
+	elseif mayOpen() then
+		bindPad(kc)
 	end
 end
 
 local function onInputEnded(input: any)
 	local kc = input.KeyCode
-	if kc ~= nil and padDown[kc] then
-		padDown[kc] = false
+	if kc ~= nil and padDown[kc] ~= nil then
+		padDown[kc] = nil
+		if kc == padAnchor and next(padSunk) == nil then
+			unbindPad()
+		end
+	end
+end
+
+-- Every Heartbeat while the action is bound: releases it once the held button is up and every
+-- press it took has ended. A sunk press is waited for here and not in onInputEnded, so a release
+-- that UserInputService reports before the action sees it cannot reach the game without its press.
+local function tickPad()
+	local anchor = padAnchor
+	if anchor == nil then
+		return
+	end
+	local waiting = false
+	for kc in padSunk do
+		local held = padDown[kc]
+		if held == nil or buttonDown(held, kc) == false then
+			padSunk[kc] = nil -- its release came, or never will (a Roblox menu took it)
+			padDown[kc] = nil
+		else
+			waiting = true
+		end
+	end
+	local pad = padDown[anchor]
+	if pad ~= nil and buttonDown(pad, anchor) == false then
+		padDown[anchor] = nil
+		pad = nil
+	end
+	if pad == nil and not waiting then
+		unbindPad()
 	end
 end
 
 local function bindInput()
+	resetPad()
 	-- Semicolon, not a function key. Studio takes F5 (Play), F7 (Start: the engine marks it processed, so the
 	-- first default never opened the panel), F8 (Run), F11 and F12; the client takes F9 (console) to F12.
 	-- Roblox leaves `;` alone on both (chat is `/`, the backpack the backtick, emotes `.`, UI selection the
 	-- backslash), and a press while typing is ignored (see onInputBegan).
 	keyCode = if opts.overlayKey == false then nil else (opts.overlayKey or enumItem("KeyCode", "Semicolon"))
+	-- Hold R3, press D-pad Left: one button per thumb and R3 is rarely held, so play does not hit it by
+	-- accident. L3 + R3 (the 0.1 default) opens a menu in some games and each stick click alone is often
+	-- sprint or crouch; D-pad Up goes to Roblox's avatar context menu when a game turns that on.
 	local pad = opts.overlayGamepad
 	if pad == false then
-		padA, padB = nil, nil
+		padHold, padPress = nil, nil
 	elseif type(pad) == "table" and pad[1] ~= nil and pad[2] ~= nil then
-		padA, padB = pad[1], pad[2]
+		padHold, padPress = pad[1], pad[2]
 	else
-		padA, padB = enumItem("KeyCode", "ButtonL3"), enumItem("KeyCode", "ButtonR3")
+		padHold, padPress = enumItem("KeyCode", "ButtonR3"), enumItem("KeyCode", "DPadLeft")
 	end
+	if padHold == nil or padPress == nil or padHold == padPress then
+		padHold, padPress = nil, nil
+	end
+	local priority = opts.overlayGamepadPriority
+	if type(priority) ~= "number" then
+		local ok, value = pcall(function()
+			return priority.Value -- an Enum.ContextActionPriority item
+		end)
+		priority = if ok and type(value) == "number" then value else PAD_PRIORITY
+	end
+	padPriority = priority
+	table.clear(padWatch)
+	if padHold ~= nil then
+		padWatch[padHold] = true
+		padWatch[padPress] = true
+	end
+	stateBegin = enumItem("UserInputState", "Begin")
+	stateEnd = enumItem("UserInputState", "End")
+	resultSink = enumItem("ContextActionResult", "Sink")
+	resultPass = enumItem("ContextActionResult", "Pass")
 	if #connections > 0 then
 		return
 	end
@@ -356,6 +515,11 @@ local function bindInput()
 			pcall(onInputEnded, input)
 		end))
 	end)
+	for _, name in { "GamepadDisconnected", "WindowFocusReleased" } do
+		pcall(function()
+			table.insert(connections, uis[name]:Connect(resetPad))
+		end)
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -404,6 +568,7 @@ function Client.tick(now: number)
 			updateStream()
 		end
 	end
+	tickPad()
 	Telemetry.clientTick(Core, now, device, sendReport)
 end
 
@@ -429,7 +594,7 @@ function Client.stop()
 		overlay = nil
 	end
 	overlayFailed = false
-	table.clear(padDown)
+	resetPad()
 end
 
 -- Last server snapshot received (subscribes on first call).

@@ -1316,7 +1316,12 @@ end
 --   studio, creatorId, creatorType ("User" | "Group"), placeId, ranks[userId],
 --   statsMissing[name] = true, stats[name] = value, analyticsFail, httpFail,
 --   devices[clientIndex] = { touch, keyboard, tenFoot, vr, viewport = {x, y}, ping,
---     focusedTextBox (what UserInputService:GetFocusedTextBox() returns) }
+--     focusedTextBox (what UserInputService:GetFocusedTextBox() returns),
+--     noButtonDown (UserInputService:IsGamepadButtonDown is missing) }
+--   uisFirst: Mock.press / Mock.release fire UserInputService before the bound actions
+-- Input goes through a small ContextActionService (BindAction, BindActionAtPriority, UnbindAction:
+-- highest priority first, the most recent bind first among equals, Sink stops the chain and marks
+-- the UserInputService event as processed, Cancel on unbind and on a bind over a press in progress).
 --------------------------------------------------------------------------------
 
 local lhExtended = false
@@ -1412,6 +1417,10 @@ local function lhService(game, name: string, index: (string) -> any, strict: boo
 	return svc
 end
 
+local function lhCancel(bind: any)
+	bind.fn(bind.name, Enum.UserInputState.Cancel, { KeyCode = Enum.KeyCode.Unknown, UserInputType = Enum.UserInputType.None })
+end
+
 function Mock.extendLighthouse()
 	if lhExtended then
 		return
@@ -1419,6 +1428,14 @@ function Mock.extendLighthouse()
 	lhExtended = true
 
 	Enum.KeyCode = lhEnumItems("KeyCode", { "F7", "F8", "Semicolon", "ButtonL3", "ButtonR3", "ButtonA", "Unknown" })
+	Enum.UserInputType = lhEnumItems("UserInputType", { "Keyboard", "Gamepad1", "Gamepad2", "None" })
+	Enum.UserInputState = lhEnumItems("UserInputState", { "Begin", "Change", "End", "Cancel", "None" })
+	Enum.ContextActionResult = lhEnumItems("ContextActionResult", { "Sink", "Pass" })
+	Enum.ContextActionPriority = {
+		Low = lhEnumItem("ContextActionPriority", "Low", 1000),
+		Medium = lhEnumItem("ContextActionPriority", "Medium", 2000),
+		High = lhEnumItem("ContextActionPriority", "High", 3000),
+	}
 	Enum.CreatorType = lhEnumItems("CreatorType", { "User", "Group" })
 	Enum.DeveloperMemoryTag = lhEnumItems("DeveloperMemoryTag", {
 		"LuaHeap",
@@ -1530,13 +1547,28 @@ function Mock.extendLighthouse()
 		local function device()
 			return lh.devices[clientIndex or 0] or {}
 		end
-		local uisSignals = { InputBegan = Signal.new(), InputEnded = Signal.new(), InputChanged = Signal.new() }
+		local uisSignals = {
+			InputBegan = Signal.new(),
+			InputEnded = Signal.new(),
+			InputChanged = Signal.new(),
+			GamepadConnected = Signal.new(),
+			GamepadDisconnected = Signal.new(),
+			WindowFocused = Signal.new(),
+			WindowFocusReleased = Signal.new(),
+		}
+		local input = { binds = {}, seq = 0, down = {} }
+		env.lhInput = input
 		env.UserInputService = lhService(game, "UserInputService", function(key)
 			local sig = uisSignals[key]
 			if sig then
 				return sig
 			end
 			local d = device()
+			if key == "IsGamepadButtonDown" and not d.noButtonDown then
+				return function(_self, pad, keyCode)
+					return input.down[keyCode] == pad
+				end
+			end
 			if key == "TouchEnabled" then
 				return d.touch == true
 			elseif key == "KeyboardEnabled" then
@@ -1548,6 +1580,54 @@ function Mock.extendLighthouse()
 			elseif key == "GetFocusedTextBox" then
 				return function()
 					return device().focusedTextBox
+				end
+			end
+			return nil
+		end)
+		local function unbind(name: string)
+			for i, bind in input.binds do
+				if bind.name == name then
+					table.remove(input.binds, i)
+					if next(bind.active) ~= nil then
+						lhCancel(bind)
+					end
+					return
+				end
+			end
+		end
+		local function bind(name: string, fn: any, priority: number, keys: { any })
+			unbind(name)
+			for _, other in input.binds do
+				if other.priority <= priority then
+					for _, keyCode in keys do
+						if other.active[keyCode] then
+							other.active[keyCode] = nil
+							lhCancel(other)
+						end
+					end
+				end
+			end
+			input.seq += 1
+			table.insert(input.binds, { name = name, fn = fn, priority = priority, keys = keys, seq = input.seq, active = {} })
+			table.sort(input.binds, function(a, b)
+				if a.priority ~= b.priority then
+					return a.priority > b.priority
+				end
+				return a.seq > b.seq
+			end)
+		end
+		env.ContextActionService = lhService(game, "ContextActionService", function(key)
+			if key == "BindAction" then
+				return function(_self, name, fn, _touch, ...)
+					bind(name, fn, 2000, { ... })
+				end
+			elseif key == "BindActionAtPriority" then
+				return function(_self, name, fn, _touch, priority, ...)
+					bind(name, fn, priority, { ... })
+				end
+			elseif key == "UnbindAction" then
+				return function(_self, name)
+					unbind(name)
 				end
 			end
 			return nil
@@ -1603,17 +1683,56 @@ function Mock.extendLighthouse()
 	end
 end
 
--- Presses (and releases) a key or gamepad button on a client.
-function Mock.press(client, keyCode, hold: boolean?, processed: boolean?)
-	local uis = client.UserInputService
-	uis.InputBegan:_fire({ KeyCode = keyCode, UserInputType = "Keyboard" }, processed == true)
-	if not hold then
-		uis.InputEnded:_fire({ KeyCode = keyCode, UserInputType = "Keyboard" })
+-- One key or button event on a client: through the bound actions (unless the engine already
+-- processed it), then UserInputService with processed = sunk.
+local function lhDispatch(client, state, keyCode, processed: boolean)
+	local input = client.lhInput
+	local name = keyCode.Name
+	local pad = string.sub(name, 1, 6) == "Button" or string.sub(name, 1, 4) == "DPad"
+	local object = { KeyCode = keyCode, UserInputType = if pad then Enum.UserInputType.Gamepad1 else Enum.UserInputType.Keyboard, UserInputState = state }
+	local began = state == Enum.UserInputState.Begin
+	input.down[keyCode] = if began then object.UserInputType else nil
+	local signal = if began then client.UserInputService.InputBegan else client.UserInputService.InputEnded
+	local uisFirst = client.world.lh.uisFirst == true
+	if uisFirst then
+		signal:_fire(object, processed)
 	end
+	local sunk = processed
+	if not processed then
+		for _, bind in table.clone(input.binds) do
+			if table.find(bind.keys, keyCode) and table.find(input.binds, bind) then
+				bind.active[keyCode] = if began then true else nil
+				if bind.fn(bind.name, state, object) ~= Enum.ContextActionResult.Pass then
+					sunk = true
+					break
+				end
+			end
+		end
+	end
+	if not uisFirst then
+		signal:_fire(object, sunk)
+	end
+	return sunk
 end
 
-function Mock.release(client, keyCode)
-	client.UserInputService.InputEnded:_fire({ KeyCode = keyCode })
+-- Presses (and releases) a key or gamepad button on a client. Returns whether a bound action
+-- sank the press.
+function Mock.press(client, keyCode, hold: boolean?, processed: boolean?): boolean
+	local sunk = lhDispatch(client, Enum.UserInputState.Begin, keyCode, processed == true)
+	if not hold then
+		lhDispatch(client, Enum.UserInputState.End, keyCode, false)
+	end
+	return sunk
+end
+
+-- Releases a held key or button. silent: the button goes up without any event (the window lost
+-- focus, a Roblox menu took the release).
+function Mock.release(client, keyCode, silent: boolean?): boolean
+	if silent then
+		client.lhInput.down[keyCode] = nil
+		return false
+	end
+	return lhDispatch(client, Enum.UserInputState.End, keyCode, false)
 end
 
 return Mock
