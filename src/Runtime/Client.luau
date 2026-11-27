@@ -15,6 +15,8 @@
 -- back once the combo is known). While it is held the other button is bound through
 -- ContextActionService at overlayGamepadPriority and sunk, so whatever the game binds to it
 -- does not fire. Nothing is bound for a player who may not open the overlay.
+-- A press the action never gets (a game action bound above that priority, Roblox's own UI
+-- navigation taking the D-pad) still toggles, from UserInputService; it just cannot be sunk.
 -- Tabs: while overlayGamepad[1] is held and the panel is open, LB and RB are bound and sunk the
 -- same way and step the tab. A bare LB / RB is never Lighthouse's: with the panel open during
 -- play those are the game's buttons.
@@ -68,6 +70,7 @@ local padWatch: { [any]: boolean } = {} -- buttons followed through UserInputSer
 local padDown: { [any]: any } = {} -- watched button -> the gamepad (UserInputType) that holds it
 local padAnchor: any = nil -- the combo button that went down first; set while the action is bound
 local padSunk: { [any]: boolean } = {} -- presses taken from the game (their releases are taken too)
+local padActed: { [any]: boolean } = {} -- presses that already toggled or stepped (acted on once)
 local stateBegin: any = nil
 local stateEnd: any = nil
 local resultSink: any = nil
@@ -368,6 +371,7 @@ local function unbindPad()
 	end
 	padAnchor = nil
 	table.clear(padSunk)
+	table.clear(padActed)
 	local cas = getService("ContextActionService")
 	if cas ~= nil then
 		pcall(cas.UnbindAction, cas, PAD_ACTION)
@@ -380,6 +384,38 @@ local function resetPad()
 	unbindPad()
 end
 
+-- A press of `kc` from gamepad `from` while a combo button is held: toggles the overlay or steps
+-- the tab, once per press whoever reports it first (the bound action or UserInputService).
+-- Returns whether the press is Lighthouse's.
+local function padPressed(kc: any, from: any): boolean
+	local anchor = padAnchor
+	local pad = anchor ~= nil and padDown[anchor]
+	if not pad or (pad ~= true and from ~= nil and from ~= pad) then
+		return false -- the held button is up again, or this press is from another gamepad
+	end
+	local step = 0
+	if padTabs and anchor == padHold and (kc == padPrev or kc == padNext) then
+		if not isVisible() then
+			return false
+		end
+		step = if kc == padPrev then -1 else 1
+	elseif kc ~= (if anchor == padHold then padPress else padHold) then
+		return false
+	end
+	if typing() then
+		return false
+	end
+	if not padActed[kc] then
+		padActed[kc] = true
+		if step == 0 then
+			Client.overlay(nil)
+		else
+			pcall(overlay.stepTab, overlay, step)
+		end
+	end
+	return true
+end
+
 -- Bound while a combo button is held. Returns Pass for everything that is not ours, so the game
 -- keeps its input; a press that toggles or steps the tab is sunk together with its release.
 local function onPadAction(_name: string, state: any, input: any): any
@@ -388,28 +424,17 @@ local function onPadAction(_name: string, state: any, input: any): any
 		return resultPass
 	end
 	if state == stateBegin then
-		local anchor = padAnchor
-		local pad = anchor ~= nil and padDown[anchor]
-		if not pad or (pad ~= true and input.UserInputType ~= nil and input.UserInputType ~= pad) then
-			return resultPass -- the held button is up again, or this press is from another gamepad
-		end
-		if typing() then
-			return resultPass
-		end
-		if kc == (if anchor == padHold then padPress else padHold) then
-			Client.overlay(nil)
-		elseif padTabs and anchor == padHold and (kc == padPrev or kc == padNext) and isVisible() then
-			pcall(overlay.stepTab, overlay, if kc == padPrev then -1 else 1)
-		else
+		if not padPressed(kc, input.UserInputType) then
 			return resultPass
 		end
 		padSunk[kc] = true
-		padDown[kc] = pad
+		padDown[kc] = padDown[padAnchor]
 		return resultSink
 	end
 	if padSunk[kc] then
 		if state == stateEnd then
 			padSunk[kc] = nil
+			padActed[kc] = nil
 			padDown[kc] = nil
 		end
 		return resultSink
@@ -458,8 +483,17 @@ local function onInputBegan(input: any, processed: boolean)
 	-- held or not is a fact about the button: a press the game or the engine processed still counts
 	local wasDown = padDown[kc] ~= nil
 	padDown[kc] = input.UserInputType or true
-	if wasDown or padAnchor ~= nil or (kc ~= padHold and kc ~= padPress) then
-		return -- while bound, onPadAction owns the combo; LB and RB are only followed
+	if padAnchor ~= nil then
+		-- Bound: onPadAction takes the press. Unless something above it took the press first (a game
+		-- action at a higher priority, Roblox's UI navigation on the D-pad): then it could not be
+		-- sunk, but the combo still does what it says.
+		if not wasDown and kc ~= padAnchor then
+			padPressed(kc, input.UserInputType)
+		end
+		return
+	end
+	if wasDown or (kc ~= padHold and kc ~= padPress) then
+		return -- LB and RB are only followed
 	end
 	if padDown[if kc == padHold then padPress else padHold] ~= nil then
 		-- both are down and nothing was bound: this player may not open the overlay (or the
@@ -477,6 +511,7 @@ local function onInputEnded(input: any)
 	local kc = input.KeyCode
 	if kc ~= nil and padDown[kc] ~= nil then
 		padDown[kc] = nil
+		padActed[kc] = nil
 		if kc == padAnchor and next(padSunk) == nil then
 			unbindPad()
 		end
@@ -496,6 +531,7 @@ local function tickPad()
 		local held = padDown[kc]
 		if held == nil or buttonDown(held, kc) == false then
 			padSunk[kc] = nil -- its release came, or never will (a Roblox menu took it)
+			padActed[kc] = nil
 			padDown[kc] = nil
 		else
 			waiting = true

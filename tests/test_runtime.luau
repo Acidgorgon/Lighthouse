@@ -610,18 +610,35 @@ return function(T)
 			return sunk
 		end
 
-		-- a game action above the default priority wins; a higher overlayGamepadPriority takes it back
+		-- a game action above the default priority gets the press first: the combo still toggles
+		-- but cannot sink it; a higher overlayGamepadPriority takes the press back
 		local world, _, clients = setup(2, nil, studio)
 		local low, high = clients[1], clients[2]
-		local game = gameInput(low, { K.DPadLeft }, 5000)
+		local game = gameInput(low, { K.DPadLeft, K.ButtonR1 }, 5000)
+		T.eq(combo(low, K.ButtonR3, K.DPadLeft), true)
+		T.check(shown(low), "still opens under a game action at 5000")
+		T.eq(game.take(), "DPadLeft Begin, DPadLeft End", "which the default 3000 cannot sink")
+		combo(low, K.ButtonR3, K.ButtonR1)
+		T.eq(#low.overlay.last.steps, 1, "the same for the tab buttons")
+		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
 		combo(low, K.ButtonR3, K.DPadLeft)
-		T.check(not shown(low), "the game's 5000 beats the default 3000")
-		T.eq(game.take(), "DPadLeft Begin, DPadLeft End")
+		T.check(not shown(low), "one toggle per press")
+		game.take()
+
 		high.lh.start({ overlayGamepadPriority = 6000 })
 		local game2 = gameInput(high, { K.DPadLeft }, 5000)
 		combo(high, K.ButtonR3, K.DPadLeft)
 		T.check(shown(high), "overlayGamepadPriority = 6000 is above it")
-		T.eq(game2.take(), "")
+		T.eq(game2.take(), "", "and sinks")
+
+		-- the engine took the press before any action (UI navigation on the D-pad while a
+		-- GuiObject is selected): the combo works all the same
+		Mock.press(high.env, K.ButtonR3, true)
+		Mock.press(high.env, K.DPadLeft, false, true)
+		T.check(not shown(high), "a processed D-pad Left still toggles while R3 is held")
+		Mock.release(high.env, K.ButtonR3)
+		Mock.press(high.env, K.DPadLeft, false, true)
+		T.check(not shown(high), "but not without R3")
 		high.lh.start({ overlayGamepadPriority = Enum.ContextActionPriority.Low })
 		Mock.press(high.env, K.ButtonR3, true)
 		T.eq(high.env.lhInput.binds[#high.env.lhInput.binds].priority, 1000, "an Enum.ContextActionPriority item works too")
@@ -657,91 +674,94 @@ return function(T)
 	end)
 
 	T.test("gamepad tabs: LB / RB step the tab only while the combo's first button is held", function()
-		local world, _, clients = setup(1, nil, studio)
-		local c = clients[1]
-		local K = Enum.KeyCode
-		local game = gameInput(c, { K.ButtonL1, K.ButtonR1, K.DPadLeft })
-		local function steps(): string
-			local o = c.overlay.last
-			local out = if o then table.concat(o.steps, " ") else ""
-			if o then
-				table.clear(o.steps)
+		for _, uisFirst in { false, true } do
+			local world, _, clients = setup(1, nil, studio)
+			world.lh.uisFirst = uisFirst
+			local c = clients[1]
+			local K = Enum.KeyCode
+			local game = gameInput(c, { K.ButtonL1, K.ButtonR1, K.DPadLeft })
+			local function steps(): string
+				local o = c.overlay.last
+				local out = if o then table.concat(o.steps, " ") else ""
+				if o then
+					table.clear(o.steps)
+				end
+				return out
 			end
-			return out
-		end
 
-		-- panel closed: held or not, the shoulder buttons are the game's
-		Mock.press(c.env, K.ButtonR3, true)
-		Mock.press(c.env, K.ButtonR1)
-		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End", "closed: R3 + RB goes to the game")
-		Mock.press(c.env, K.DPadLeft)
-		T.check(shown(c), "opened")
-		T.eq(c.overlay.last.hints[1], "R3+LB", "the panel is told the hints")
-		T.eq(c.overlay.last.hints[2], "R3+RB")
+			-- panel closed: held or not, the shoulder buttons are the game's
+			Mock.press(c.env, K.ButtonR3, true)
+			Mock.press(c.env, K.ButtonR1)
+			T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End", "closed: R3 + RB goes to the game")
+			Mock.press(c.env, K.DPadLeft)
+			T.check(shown(c), "opened")
+			T.eq(c.overlay.last.hints[1], "R3+LB", "the panel is told the hints")
+			T.eq(c.overlay.last.hints[2], "R3+RB")
 
-		-- still holding R3: RB next, LB previous, both sunk
-		T.eq(Mock.press(c.env, K.ButtonR1), true)
-		T.eq(Mock.press(c.env, K.ButtonR1), true)
-		T.eq(Mock.press(c.env, K.ButtonL1), true)
-		T.eq(steps(), "1 1 -1", "R3 + RB / LB step the tab")
-		T.eq(game.take(), "", "the game saw none of it")
-		Mock.release(c.env, K.ButtonR3)
-		run(world, 0.05)
-		T.check(not padBound(c))
-
-		-- the defect: pass and shoot with the panel open must not switch tabs
-		for _ = 1, 3 do
-			T.eq(Mock.press(c.env, K.ButtonL1), true)
+			-- still holding R3: RB next, LB previous, both sunk
 			T.eq(Mock.press(c.env, K.ButtonR1), true)
+			T.eq(Mock.press(c.env, K.ButtonR1), true)
+			T.eq(Mock.press(c.env, K.ButtonL1), true)
+			T.eq(steps(), "1 1 -1", "R3 + RB / LB step the tab")
+			T.eq(game.take(), "", "the game saw none of it")
+			Mock.release(c.env, K.ButtonR3)
+			run(world, 0.05)
+			T.check(not padBound(c))
+
+			-- the defect: pass and shoot with the panel open must not switch tabs
+			for _ = 1, 3 do
+				T.eq(Mock.press(c.env, K.ButtonL1), true)
+				T.eq(Mock.press(c.env, K.ButtonR1), true)
+			end
+			T.eq(steps(), "", "a bare LB / RB never steps the tab")
+			local one = "ButtonL1 Begin, ButtonL1 End, ButtonR1 Begin, ButtonR1 End"
+			T.eq(game.take(), table.concat({ one, one, one }, ", "), "the game got every press")
+
+			-- holding the combo's second button is not the modifier
+			Mock.press(c.env, K.DPadLeft, true)
+			Mock.press(c.env, K.ButtonR1)
+			Mock.release(c.env, K.DPadLeft)
+			T.eq(steps(), "", "D-pad Left + RB is the game's")
+			T.eq(game.take(), "DPadLeft Begin, ButtonR1 Begin, ButtonR1 End, DPadLeft End")
+
+			-- a shoulder button already down when R3 goes down stays the game's: no Cancel, and its release arrives
+			Mock.press(c.env, K.ButtonR1, true)
+			Mock.press(c.env, K.ButtonR3, true)
+			Mock.press(c.env, K.ButtonL1)
+			Mock.release(c.env, K.ButtonR1)
+			Mock.release(c.env, K.ButtonR3)
+			T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End", "the held shot was not cancelled")
+			T.eq(steps(), "-1", "LB was free and stepped")
+			run(world, 0.05)
+
+			-- the held button goes up first: the sunk shoulder press keeps its release
+			Mock.press(c.env, K.ButtonR3, true)
+			Mock.press(c.env, K.ButtonR1, true)
+			Mock.release(c.env, K.ButtonR3)
+			run(world, 0.05)
+			Mock.release(c.env, K.ButtonR1)
+			T.eq(game.take(), "", "no release without a press")
+			T.eq(steps(), "1")
+			run(world, 0.05)
+			T.check(not padBound(c))
+
+			-- typing: nothing steps
+			world.lh.devices[1] = { focusedTextBox = {} }
+			Mock.press(c.env, K.ButtonR3, true)
+			Mock.press(c.env, K.ButtonR1)
+			Mock.release(c.env, K.ButtonR3)
+			world.lh.devices[1] = nil
+			T.eq(steps(), "")
+			T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
+
+			-- closed from its own button while R3 is held: the shoulder buttons go back to the game at once
+			Mock.press(c.env, K.ButtonR3, true)
+			c.overlay.last:setVisible(false)
+			Mock.press(c.env, K.ButtonR1)
+			Mock.release(c.env, K.ButtonR3)
+			T.eq(steps(), "")
+			T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
 		end
-		T.eq(steps(), "", "a bare LB / RB never steps the tab")
-		local one = "ButtonL1 Begin, ButtonL1 End, ButtonR1 Begin, ButtonR1 End"
-		T.eq(game.take(), table.concat({ one, one, one }, ", "), "the game got every press")
-
-		-- holding the combo's second button is not the modifier
-		Mock.press(c.env, K.DPadLeft, true)
-		Mock.press(c.env, K.ButtonR1)
-		Mock.release(c.env, K.DPadLeft)
-		T.eq(steps(), "", "D-pad Left + RB is the game's")
-		T.eq(game.take(), "DPadLeft Begin, ButtonR1 Begin, ButtonR1 End, DPadLeft End")
-
-		-- a shoulder button already down when R3 goes down stays the game's: no Cancel, and its release arrives
-		Mock.press(c.env, K.ButtonR1, true)
-		Mock.press(c.env, K.ButtonR3, true)
-		Mock.press(c.env, K.ButtonL1)
-		Mock.release(c.env, K.ButtonR1)
-		Mock.release(c.env, K.ButtonR3)
-		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End", "the held shot was not cancelled")
-		T.eq(steps(), "-1", "LB was free and stepped")
-		run(world, 0.05)
-
-		-- the held button goes up first: the sunk shoulder press keeps its release
-		Mock.press(c.env, K.ButtonR3, true)
-		Mock.press(c.env, K.ButtonR1, true)
-		Mock.release(c.env, K.ButtonR3)
-		run(world, 0.05)
-		Mock.release(c.env, K.ButtonR1)
-		T.eq(game.take(), "", "no release without a press")
-		T.eq(steps(), "1")
-		run(world, 0.05)
-		T.check(not padBound(c))
-
-		-- typing: nothing steps
-		world.lh.devices[1] = { focusedTextBox = {} }
-		Mock.press(c.env, K.ButtonR3, true)
-		Mock.press(c.env, K.ButtonR1)
-		Mock.release(c.env, K.ButtonR3)
-		world.lh.devices[1] = nil
-		T.eq(steps(), "")
-		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
-
-		-- closed from its own button while R3 is held: the shoulder buttons go back to the game at once
-		Mock.press(c.env, K.ButtonR3, true)
-		c.overlay.last:setVisible(false)
-		Mock.press(c.env, K.ButtonR1)
-		Mock.release(c.env, K.ButtonR3)
-		T.eq(steps(), "")
-		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
 	end)
 
 	T.test("gamepad tabs: overlayGamepadTabs = false, and combos that use a shoulder button", function()
