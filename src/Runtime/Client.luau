@@ -15,6 +15,9 @@
 -- back once the combo is known). While it is held the other button is bound through
 -- ContextActionService at overlayGamepadPriority and sunk, so whatever the game binds to it
 -- does not fire. Nothing is bound for a player who may not open the overlay.
+-- Tabs: while overlayGamepad[1] is held and the panel is open, LB and RB are bound and sunk the
+-- same way and step the tab. A bare LB / RB is never Lighthouse's: with the panel open during
+-- play those are the game's buttons.
 
 local Wire = require(script.Parent.Wire)
 local Telemetry = require(script.Parent.Telemetry)
@@ -58,6 +61,9 @@ local keyCode: any = nil
 local padHold: any = nil -- overlayGamepad[1]
 local padPress: any = nil -- overlayGamepad[2]
 local padPriority = PAD_PRIORITY
+local padTabs = false -- overlayGamepadTabs, and the combo leaves LB and RB free
+local padPrev: any = nil -- ButtonL1
+local padNext: any = nil -- ButtonR1
 local padWatch: { [any]: boolean } = {} -- buttons followed through UserInputService
 local padDown: { [any]: any } = {} -- watched button -> the gamepad (UserInputType) that holds it
 local padAnchor: any = nil -- the combo button that went down first; set while the action is bound
@@ -136,6 +142,34 @@ local function sourceFn(side: string): any
 end
 Client.source = sourceFn
 
+local PAD_NAMES = {
+	ButtonL1 = "LB",
+	ButtonR1 = "RB",
+	ButtonL2 = "LT",
+	ButtonR2 = "RT",
+	ButtonSelect = "View",
+	ButtonStart = "Menu",
+}
+
+local function padName(kc: any): string
+	local ok, name = pcall(function()
+		return kc.Name
+	end)
+	if not ok or type(name) ~= "string" then
+		return tostring(kc)
+	end
+	return PAD_NAMES[name] or (string.gsub(name, "^Button", ""))
+end
+
+-- What the panel prints next to its tab bar on a gamepad; nil when no button steps the tab.
+local function tabHints(): { string }?
+	if not padTabs then
+		return nil
+	end
+	local hold = padName(padHold)
+	return { hold .. "+" .. padName(padPrev), hold .. "+" .. padName(padNext) }
+end
+
 local function ensureOverlay(): any
 	if overlay ~= nil or overlayFailed then
 		return overlay
@@ -147,7 +181,7 @@ local function ensureOverlay(): any
 			error("Overlay module missing")
 		end
 		local Overlay = require(module) :: any
-		return Overlay.new(sourceFn)
+		return Overlay.new(sourceFn, { tabHints = tabHints() })
 	end)
 	if ok and result ~= nil then
 		overlay = result
@@ -347,7 +381,7 @@ local function resetPad()
 end
 
 -- Bound while a combo button is held. Returns Pass for everything that is not ours, so the game
--- keeps its input; a press that toggles is sunk together with its release.
+-- keeps its input; a press that toggles or steps the tab is sunk together with its release.
 local function onPadAction(_name: string, state: any, input: any): any
 	local kc = input and input.KeyCode
 	if kc == nil then
@@ -359,12 +393,18 @@ local function onPadAction(_name: string, state: any, input: any): any
 		if not pad or (pad ~= true and input.UserInputType ~= nil and input.UserInputType ~= pad) then
 			return resultPass -- the held button is up again, or this press is from another gamepad
 		end
-		if kc ~= (if anchor == padHold then padPress else padHold) or typing() then
+		if typing() then
+			return resultPass
+		end
+		if kc == (if anchor == padHold then padPress else padHold) then
+			Client.overlay(nil)
+		elseif padTabs and anchor == padHold and (kc == padPrev or kc == padNext) and isVisible() then
+			pcall(overlay.stepTab, overlay, if kc == padPrev then -1 else 1)
+		else
 			return resultPass
 		end
 		padSunk[kc] = true
 		padDown[kc] = pad
-		Client.overlay(nil)
 		return resultSink
 	end
 	if padSunk[kc] then
@@ -383,8 +423,18 @@ local function bindPad(anchor: any): boolean
 		return false
 	end
 	padAnchor = anchor
-	local other = if anchor == padHold then padPress else padHold
-	local ok = pcall(cas.BindActionAtPriority, cas, PAD_ACTION, onPadAction, false, padPriority, other)
+	local buttons = { if anchor == padHold then padPress else padHold }
+	if padTabs and anchor == padHold then
+		-- a shoulder button that is down belongs to the game for this hold: binding over a press in
+		-- progress would cancel the game's action
+		local pad = padDown[anchor]
+		for _, kc in { padPrev, padNext } do
+			if padDown[kc] == nil and buttonDown(pad, kc) ~= true then
+				table.insert(buttons, kc)
+			end
+		end
+	end
+	local ok = pcall(cas.BindActionAtPriority, cas, PAD_ACTION, onPadAction, false, padPriority, table.unpack(buttons))
 	if not ok then
 		padAnchor = nil
 	end
@@ -408,8 +458,8 @@ local function onInputBegan(input: any, processed: boolean)
 	-- held or not is a fact about the button: a press the game or the engine processed still counts
 	local wasDown = padDown[kc] ~= nil
 	padDown[kc] = input.UserInputType or true
-	if wasDown or padAnchor ~= nil then
-		return -- while bound, onPadAction owns the combo
+	if wasDown or padAnchor ~= nil or (kc ~= padHold and kc ~= padPress) then
+		return -- while bound, onPadAction owns the combo; LB and RB are only followed
 	end
 	if padDown[if kc == padHold then padPress else padHold] ~= nil then
 		-- both are down and nothing was bound: this player may not open the overlay (or the
@@ -490,10 +540,24 @@ local function bindInput()
 		priority = if ok and type(value) == "number" then value else PAD_PRIORITY
 	end
 	padPriority = priority
+	padPrev, padNext = enumItem("KeyCode", "ButtonL1"), enumItem("KeyCode", "ButtonR1")
+	padTabs = opts.overlayGamepadTabs ~= false and padHold ~= nil and padPrev ~= nil and padNext ~= nil
+	for _, kc in { padPrev, padNext } do
+		if kc == padHold or kc == padPress then
+			padTabs = false -- the combo itself uses a shoulder button
+		end
+	end
 	table.clear(padWatch)
 	if padHold ~= nil then
 		padWatch[padHold] = true
 		padWatch[padPress] = true
+	end
+	if padTabs then
+		padWatch[padPrev] = true
+		padWatch[padNext] = true
+	end
+	if overlay ~= nil then
+		pcall(overlay.setTabHints, overlay, tabHints())
 	end
 	stateBegin = enumItem("UserInputState", "Begin")
 	stateEnd = enumItem("UserInputState", "End")

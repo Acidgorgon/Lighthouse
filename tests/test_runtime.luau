@@ -9,11 +9,17 @@ return function(T)
 	-- Stand-in for Overlay.luau (the real one needs the GUI mock): records what Runtime asks.
 	local function fakeOverlayModule()
 		local mod = { created = 0, last = nil }
-		function mod.new(source)
+		function mod.new(source, opts)
 			mod.created += 1
-			local o = { visible = false, destroyed = false, source = source }
+			local o = { visible = false, destroyed = false, source = source, opts = opts, steps = {}, hints = opts and opts.tabHints }
 			function o:setVisible(on)
 				self.visible = on
+			end
+			function o:stepTab(delta)
+				table.insert(self.steps, delta)
+			end
+			function o:setTabHints(hints)
+				self.hints = hints
 			end
 			function o:isVisible()
 				return self.visible
@@ -650,6 +656,145 @@ return function(T)
 		local _ = world
 	end)
 
+	T.test("gamepad tabs: LB / RB step the tab only while the combo's first button is held", function()
+		local world, _, clients = setup(1, nil, studio)
+		local c = clients[1]
+		local K = Enum.KeyCode
+		local game = gameInput(c, { K.ButtonL1, K.ButtonR1, K.DPadLeft })
+		local function steps(): string
+			local o = c.overlay.last
+			local out = if o then table.concat(o.steps, " ") else ""
+			if o then
+				table.clear(o.steps)
+			end
+			return out
+		end
+
+		-- panel closed: held or not, the shoulder buttons are the game's
+		Mock.press(c.env, K.ButtonR3, true)
+		Mock.press(c.env, K.ButtonR1)
+		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End", "closed: R3 + RB goes to the game")
+		Mock.press(c.env, K.DPadLeft)
+		T.check(shown(c), "opened")
+		T.eq(c.overlay.last.hints[1], "R3+LB", "the panel is told the hints")
+		T.eq(c.overlay.last.hints[2], "R3+RB")
+
+		-- still holding R3: RB next, LB previous, both sunk
+		T.eq(Mock.press(c.env, K.ButtonR1), true)
+		T.eq(Mock.press(c.env, K.ButtonR1), true)
+		T.eq(Mock.press(c.env, K.ButtonL1), true)
+		T.eq(steps(), "1 1 -1", "R3 + RB / LB step the tab")
+		T.eq(game.take(), "", "the game saw none of it")
+		Mock.release(c.env, K.ButtonR3)
+		run(world, 0.05)
+		T.check(not padBound(c))
+
+		-- the defect: pass and shoot with the panel open must not switch tabs
+		for _ = 1, 3 do
+			T.eq(Mock.press(c.env, K.ButtonL1), true)
+			T.eq(Mock.press(c.env, K.ButtonR1), true)
+		end
+		T.eq(steps(), "", "a bare LB / RB never steps the tab")
+		local one = "ButtonL1 Begin, ButtonL1 End, ButtonR1 Begin, ButtonR1 End"
+		T.eq(game.take(), table.concat({ one, one, one }, ", "), "the game got every press")
+
+		-- holding the combo's second button is not the modifier
+		Mock.press(c.env, K.DPadLeft, true)
+		Mock.press(c.env, K.ButtonR1)
+		Mock.release(c.env, K.DPadLeft)
+		T.eq(steps(), "", "D-pad Left + RB is the game's")
+		T.eq(game.take(), "DPadLeft Begin, ButtonR1 Begin, ButtonR1 End, DPadLeft End")
+
+		-- a shoulder button already down when R3 goes down stays the game's: no Cancel, and its release arrives
+		Mock.press(c.env, K.ButtonR1, true)
+		Mock.press(c.env, K.ButtonR3, true)
+		Mock.press(c.env, K.ButtonL1)
+		Mock.release(c.env, K.ButtonR1)
+		Mock.release(c.env, K.ButtonR3)
+		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End", "the held shot was not cancelled")
+		T.eq(steps(), "-1", "LB was free and stepped")
+		run(world, 0.05)
+
+		-- the held button goes up first: the sunk shoulder press keeps its release
+		Mock.press(c.env, K.ButtonR3, true)
+		Mock.press(c.env, K.ButtonR1, true)
+		Mock.release(c.env, K.ButtonR3)
+		run(world, 0.05)
+		Mock.release(c.env, K.ButtonR1)
+		T.eq(game.take(), "", "no release without a press")
+		T.eq(steps(), "1")
+		run(world, 0.05)
+		T.check(not padBound(c))
+
+		-- typing: nothing steps
+		world.lh.devices[1] = { focusedTextBox = {} }
+		Mock.press(c.env, K.ButtonR3, true)
+		Mock.press(c.env, K.ButtonR1)
+		Mock.release(c.env, K.ButtonR3)
+		world.lh.devices[1] = nil
+		T.eq(steps(), "")
+		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
+
+		-- closed from its own button while R3 is held: the shoulder buttons go back to the game at once
+		Mock.press(c.env, K.ButtonR3, true)
+		c.overlay.last:setVisible(false)
+		Mock.press(c.env, K.ButtonR1)
+		Mock.release(c.env, K.ButtonR3)
+		T.eq(steps(), "")
+		T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End")
+	end)
+
+	T.test("gamepad tabs: overlayGamepadTabs = false, and combos that use a shoulder button", function()
+		local K = Enum.KeyCode
+		local world, _, clients = setup(3, nil, studio)
+		local function tryTab(c)
+			local game = gameInput(c, { K.ButtonL1, K.ButtonR1 })
+			c.lh.overlay(true)
+			Mock.press(c.env, K.ButtonR3, true)
+			local sunk = Mock.press(c.env, K.ButtonR1)
+			Mock.release(c.env, K.ButtonR3)
+			run(world, 0.05)
+			return sunk, #c.overlay.last.steps, game
+		end
+
+		local off = clients[1]
+		off.lh.start({ overlayGamepadTabs = false })
+		local sunk, n = tryTab(off)
+		T.eq(sunk, true, "the game's own action took it")
+		T.eq(n, 0, "overlayGamepadTabs = false: R3 + RB does nothing")
+		T.eq(off.overlay.last.hints, nil, "and no hint")
+		Mock.press(off.env, K.ButtonR3, true)
+		T.eq(Mock.press(off.env, K.DPadLeft), true)
+		Mock.release(off.env, K.ButtonR3)
+		T.check(not shown(off), "the combo itself still works")
+
+		-- options are applied on a later start(): the open panel gets its hints back
+		off.lh.overlay(true)
+		off.lh.start({ overlayGamepadTabs = true, overlayGamepad = { K.ButtonL3, K.ButtonR3 } })
+		T.eq(off.overlay.last.hints[2], "L3+RB", "hints follow the combo's first button")
+		Mock.press(off.env, K.ButtonL3, true)
+		Mock.press(off.env, K.ButtonL1)
+		Mock.release(off.env, K.ButtonL3)
+		T.eq(off.overlay.last.steps[1], -1, "L3 + LB")
+
+		-- a combo that uses LB or RB leaves no shoulder button for tabs
+		local shoulder = clients[2]
+		shoulder.lh.start({ overlayGamepad = { K.ButtonL1, K.ButtonR1 } })
+		Mock.press(shoulder.env, K.ButtonL1, true)
+		Mock.press(shoulder.env, K.ButtonR1)
+		T.check(shown(shoulder), "LB + RB opens")
+		T.eq(shoulder.overlay.last.hints, nil, "no tab buttons, no hints")
+		T.eq(#shoulder.overlay.last.steps, 0)
+		Mock.release(shoulder.env, K.ButtonL1)
+
+		-- no gamepad at all: no tab buttons either
+		local none = clients[3]
+		none.lh.start({ overlayGamepad = false })
+		local _, n3 = tryTab(none)
+		T.eq(n3, 0, "overlayGamepad = false: nothing steps")
+		T.eq(none.overlay.last.hints, nil)
+	end)
+
 	T.test("gamepad combo: nothing is bound or sunk for a player who may not open the overlay", function()
 		local world, server, clients = setup(2)
 		run(world, 0.5)
@@ -716,6 +861,53 @@ return function(T)
 		other.lh.overlay(true)
 		T.check(not other.rt.Client.overlayVisible())
 		T.check(string.find(table.concat(world.warnings, "\n"), "overlay unavailable", 1, true) ~= nil)
+	end)
+
+	T.test("gamepad: the combo and the tab buttons drive the real panel", function()
+		local GuiMock = loadstring(readfile(T.ROOT .. "/tests/gui_mock.luau"))()
+		local world, _, clients = setup(1, nil, studio)
+		local c = clients[1]
+		c.env.modules[OVERLAY_PATH] = nil -- use src/Overlay/Overlay.luau
+		local gui = GuiMock.install(Mock, c.env, { gamepad = true })
+		local ok, err = xpcall(function()
+			-- the GUI mock replaced the input signals: connect to them
+			c.lh.stop()
+			c.lh.start()
+			run(world, 1.5)
+			local K = Enum.KeyCode
+			local game = gameInput(c, { K.ButtonL1, K.ButtonR1 })
+
+			Mock.press(c.env, K.ButtonR3, true)
+			Mock.press(c.env, K.DPadLeft)
+			T.check(c.rt.Client.overlayVisible(), "R3 + D-pad Left opens the real panel")
+			local panel = gui.PlayerGui:FindFirstChild("Lighthouse"):FindFirstChild("Panel")
+			local tabs, body = panel:FindFirstChild("Tabs"), panel:FindFirstChild("Body")
+			T.eq(tabs:FindFirstChild("LB").Text, "R3+LB", "hint")
+			T.eq(tabs:FindFirstChild("LB").Visible, true)
+			T.eq(body:FindFirstChild("Frame").Visible, true, "first tab")
+
+			Mock.press(c.env, K.ButtonR1)
+			T.eq(body:FindFirstChild("Probes").Visible, true, "R3 + RB: next tab")
+			Mock.press(c.env, K.ButtonL1)
+			Mock.press(c.env, K.ButtonL1)
+			T.eq(body:FindFirstChild("Players").Visible, true, "R3 + LB wraps to the last tab")
+			T.eq(game.take(), "", "all sunk")
+			Mock.release(c.env, K.ButtonR3)
+			run(world, 0.05)
+
+			Mock.press(c.env, K.ButtonR1)
+			Mock.press(c.env, K.ButtonL1)
+			T.eq(body:FindFirstChild("Players").Visible, true, "bare shoulder buttons leave the tab alone")
+			T.eq(game.take(), "ButtonR1 Begin, ButtonR1 End, ButtonL1 Begin, ButtonL1 End")
+
+			Mock.press(c.env, K.ButtonR3, true)
+			Mock.press(c.env, K.DPadLeft)
+			Mock.release(c.env, K.ButtonR3)
+			T.check(not c.rt.Client.overlayVisible(), "closed")
+			c.lh.stop()
+		end, debug.traceback)
+		gui:uninstall()
+		T.check(ok, tostring(err))
 	end)
 
 	T.test("telemetry: reports aggregate by device class with real percentiles", function()
