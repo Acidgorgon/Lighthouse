@@ -1,4 +1,4 @@
-# Lighthouse design (v0.1)
+# Lighthouse design (v0.2)
 
 Lighthouse is profiling and live telemetry for Roblox. It answers "where do my milliseconds and bytes
 go?" with real numbers instead of guesses: per-system CPU on client and server, frame time, network
@@ -38,7 +38,7 @@ src/
     Sampler.luau       engine numbers: Heartbeat/RenderStepped dt, Stats service, memory tags, ping, instance count
     Wire.luau          buffer codec for server->viewer stream and client->server reports (versioned, validated)
     Server.luau        viewer permissions, streams server snapshot to viewers, receives client reports, aggregates
-    Client.luau        receives server snapshot, sends reports, owns the overlay toggle
+    Client.luau        receives server snapshot, sends reports, owns the overlay's keyboard and gamepad input
     Telemetry.luau     player telemetry: sampling, aggregation by device class, AnalyticsService + HTTP + onReport
     Device.luau        device class: "Desktop" | "Mobile" | "Tablet" | "Console" | "VR"
   Overlay/
@@ -100,8 +100,10 @@ Names are interned once; a probe is a small object with an integer id.
 | `frames` | `600` | frames kept in the ring |
 | `microprofiler` | `RunService:IsStudio()` | also call debug.profilebegin/end |
 | `viewers` | creator + Studio | server: `function(player): boolean` or a list of UserIds / group `{ group = id, rank = n }` allowed to see server numbers and open the overlay in live games |
-| `overlayKey` | `Enum.KeyCode.F8` | keyboard toggle |
-| `overlayGamepad` | `{ ButtonL3, ButtonR3 }` | press both to toggle (controller players) |
+| `overlayKey` | `Enum.KeyCode.Semicolon` | keyboard toggle (`false`: none); ignored while typing |
+| `overlayGamepad` | `{ ButtonR3, DPadLeft }` | `{ hold, press }`: hold the first, press the second to toggle; the second is sunk. `false`: no gamepad input at all |
+| `overlayGamepadTabs` | `true` | hold `overlayGamepad[1]` + LB / RB: previous / next tab while the panel is open (sunk) |
+| `overlayGamepadPriority` | `3000` (`Enum.ContextActionPriority.High`) | ContextActionService priority of the combo and tab buttons (number or the Enum item) |
 | `telemetry` | `false` | `true` or a table: `{ sample = 0.1, every = 60, analytics = true, http = nil }` |
 | `stream` | `1` | seconds between server snapshot sends to viewers |
 
@@ -248,8 +250,49 @@ or hidden on close, updated at 4 Hz (never per frame). Tabs: **Frame** (frame-ti
 script vs frame, flares list), **Probes** (top self time, grouped by dot prefix, client | server toggle),
 **Network** (channels by lib, in/out bytes/s), **Memory** (tags, Luau heap and garbage rate), **Players**
 (server: telemetry by device class). Works with keyboard, mouse, touch and gamepad (tabs selectable with
-the D-pad, LB/RB switch tab). Toggle: F8, or L3+R3 together on a gamepad, or `Lighthouse.overlay()`.
+the D-pad). Toggle: `;`, or hold R3 and press D-pad Left on a gamepad, or `Lighthouse.overlay()`.
 Only viewers (see `viewers`) can open it in live games; in Studio everyone can.
+
+### Overlay input
+
+The panel stays open while the game is played, on a controller too, so the rule is: **Lighthouse takes
+no input the player did not address to it.** The Overlay module connects to no key or button; all of it
+is in Runtime/Client.
+
+- **Keyboard.** One key, `overlayKey`, default `;`. Not a function key: Studio takes F5 (Play), F7
+  (Start: it arrives marked as processed, which is why the 0.1.0 default never opened the panel), F8
+  (Run, the 0.1.1 default), F11 and F12, and the client takes F9, F11 and F12. Roblox binds `/` (chat),
+  the backtick (backpack), `.` (emotes), the backslash (UI selection), Tab and Esc; it leaves `;` alone
+  in Studio and in a live client. The toggle ignores a press that is `processed` and any press while
+  `UserInputService:GetFocusedTextBox()` is not nil.
+- **Gamepad combo.** `overlayGamepad = { hold, press }`, default hold R3 + D-pad Left (one button per
+  thumb; R3 is rarely held, so play does not hit it by accident; L3 + R3 and R3 + D-pad Up are menus
+  in games that use Lighthouse, and D-pad Up is Roblox's avatar context menu where a game enables it). Whichever of the two
+  goes down first is the *anchor*: seen through `UserInputService.InputBegan` (whatever `processed`
+  says: held is a fact about the button) and left to the game, because a press cannot be taken back
+  once the combo is known. While the anchor is held, the other button is bound with
+  `ContextActionService:BindActionAtPriority("LighthouseOverlay", ..., overlayGamepadPriority, ...)`;
+  its press toggles and returns `Sink`, and so does its release. Everything else returns `Pass`.
+- **Tabs.** While the anchor is `overlayGamepad[1]` and `overlayGamepadTabs` is on, LB and RB are in
+  the same bind: with the panel open they call `overlay:stepTab(-1 | 1)` and are sunk, otherwise
+  `Pass`. A bare LB / RB is never Lighthouse's (they are pass and shoot in a football game). A
+  shoulder button already down when the anchor goes down is not bound for that hold: binding over a
+  press in progress sends the game's action a `Cancel`. Off when the combo itself uses LB or RB.
+- **Release.** The bind goes when the anchor is released. If a sunk press is still down then, it is
+  kept until that press ends (checked every Heartbeat), so the game never gets a release without its
+  press. Also released on `GamepadDisconnected`, `WindowFocusReleased`, `stop()`, a new `start()`,
+  and when `IsGamepadButtonDown` says the anchor is up although no `InputEnded` arrived (a Roblox
+  menu took it).
+- **Who.** Nothing is bound or sunk unless the player may open the overlay (allowed by the server, or
+  Studio). Otherwise both buttons down only asks the server, as in 0.1; that is also how a viewer's
+  first press in a live session opens it.
+- **Fallback.** A press the bound action never gets (a game action above `overlayGamepadPriority`,
+  the engine using the D-pad for UI navigation while a GuiObject is selected) still acts when
+  `UserInputService` reports it while the anchor is held; it cannot be sunk. Each press acts once,
+  whichever of the two reports it first.
+- **Mouse, touch, selection.** The panel is `Active` (clicks and touches on it stop there) and a
+  `SelectionGroup` without `Stop` edges: the D-pad can always leave it. Its buttons are Selectable,
+  so while it is open it takes part in the game's D-pad navigation like any other UI.
 
 ## Library hooks (Current, Ripple, Tide)
 
@@ -268,7 +311,7 @@ Lighthouse), and wrap their per-frame work in probes named `"<Lib>.<Stage>"` (e.
 `Ripple.Encode`, `Tide.Relay`), created lazily from `lh.probe`. The hook API that libraries may rely on is
 frozen: `probe(name)`, `net(lib, channel, dir, bytes, player?)`, `count(name, n?)`, `gauge(name, v)`.
 
-## Internal contract between modules (v0.1)
+## Internal contract between modules (v0.2)
 
 `src/Core/init.luau` (module `Core`) is pure Luau with no Roblox services (testable anywhere). It exports:
 
@@ -309,5 +352,7 @@ histogram unchanged on bad input.
 (every call; Runtime must accept repeats); `stop()` calls `Core.setActive(false)` then `Runtime.stop()`.
 The Runtime module is required on first use (start, overlay, onReport, remote); Runtime calls are
 pcall'd and a failure is a warning, never an error in the game. Runtime modules receive Core
-via `Runtime.start(Core, opts)`; Overlay via `Overlay.new(sourceFn)` where `sourceFn(side)` returns the latest
-Snapshot for "client" or "server" (server one arrives over the wire) plus the telemetry aggregate.
+via `Runtime.start(Core, opts)`; Overlay via `Overlay.new(sourceFn, opts?)` where `sourceFn(side)` returns the latest
+Snapshot for "client" or "server" (server one arrives over the wire) plus the telemetry aggregate, and
+`opts.tabHints = { previous, next }` is the text next to the tab bar on a gamepad (nil: none). Client drives the
+panel with `setVisible(on)`, `isVisible()`, `stepTab(delta)`, `setTabHints(hints?)` and `destroy()`.

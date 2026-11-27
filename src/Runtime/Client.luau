@@ -550,9 +550,9 @@ end
 local function bindInput()
 	resetPad()
 	-- Semicolon, not a function key. Studio takes F5 (Play), F7 (Start: the engine marks it processed, so the
-	-- first default never opened the panel), F8 (Run), F11 and F12; the client takes F9 (console) to F12.
-	-- Roblox leaves `;` alone on both (chat is `/`, the backpack the backtick, emotes `.`, UI selection the
-	-- backslash), and a press while typing is ignored (see onInputBegan).
+	-- first default never opened the panel), F8 (Run), F11 and F12; the client takes F9 (console), F11 and
+	-- F12. Roblox leaves `;` alone on both (chat is `/`, the backpack the backtick, emotes `.`, UI selection
+	-- the backslash), and a press while typing is ignored (see onInputBegan).
 	keyCode = if opts.overlayKey == false then nil else (opts.overlayKey or enumItem("KeyCode", "Semicolon"))
 	-- Hold R3, press D-pad Left: one button per thumb and R3 is rarely held, so play does not hit it by
 	-- accident. L3 + R3 (the 0.1 default) opens a menu in some games and each stick click alone is often

@@ -25,7 +25,7 @@ features:
     details: Wrap a function or bind it to a signal and it shows up by name, with self time, total time, p95 and calls per frame. Names line up with the MicroProfiler.
   - icon: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16v-3"/><path d="M11 16V8"/><path d="M15 16v-5"/><path d="M19 16V5"/></svg>
     title: Overlay and viewer
-    details: An in-game panel for mouse, touch and controller (F8, or L3 + R3), and a web viewer for exports with a zoomable frame timeline.
+    details: An in-game panel for mouse, touch and controller (the ; key, or hold R3 + D-pad Left), and a web viewer for exports with a zoomable frame timeline.
   - icon: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
     title: Real devices
     details: Sampled players report frame percentiles, memory and their slowest systems. The server merges them by device class, so you see what phones and consoles really get.
@@ -62,6 +62,6 @@ Lighthouse.bind(RunService.Heartbeat, "Crowd.Step", stepCrowd)
 
 :::
 
-Press **F8** in Studio (or **L3 + R3** on a controller) to open the overlay.
+Press **;** (or hold **R3** and press **D-pad Left** on a controller) to open the overlay.
 [Getting started](/guide/getting-started) walks through it, [Probes](/guide/probes) explains what the
 numbers mean, and [the viewer](/viewer) opens an export in your browser.

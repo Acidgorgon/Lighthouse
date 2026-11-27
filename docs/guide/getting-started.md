@@ -58,7 +58,7 @@ Lighthouse.start()
 :::
 
 That already gives you frame time, frame percentiles, engine numbers (heartbeat, physics, network
-kbps, instance count, ping) and memory by tag. Press **F8** in Studio to see them.
+kbps, instance count, ping) and memory by tag. Press **;** (semicolon) to see them.
 
 Options go in the same call. All are optional; see [the API reference](/reference/api#options):
 
@@ -97,10 +97,14 @@ Open the overlay, go to **Probes**, and `Crowd.Step` is there with its time per 
 
 | Input | Action |
 |---|---|
-| **F8** | toggle (keyboard) |
-| **L3 + R3** | toggle (press both thumbsticks on a controller) |
-| **LB / RB** | previous / next tab while open |
+| **;** (semicolon) | toggle (keyboard) |
+| hold **R3**, press **D-pad Left** | toggle (controller) |
+| hold **R3**, press **LB / RB** | previous / next tab while open |
 | `Lighthouse.overlay()` | toggle from code |
+
+The same key works in Studio and in a live client, and never fires while you type. The controller
+buttons reach the game untouched unless R3 is held. [Input the overlay takes](/guide/overlay#input-the-overlay-takes)
+has the details and the options to change or turn off each one.
 
 In Studio everyone can open it. In live games only [viewers](/guide/overlay#viewers) can: by default
 the game's creator, or rank 255 in the owning group.
