@@ -175,7 +175,7 @@ local function setup(opts: any?)
 	local overlay = Overlay.new(function(side)
 		state.calls += 1
 		return state[side]
-	end)
+	end, opts and opts.overlay)
 	return {
 		world = world,
 		client = client,
@@ -381,13 +381,15 @@ T.test("refreshes at 4 Hz from Heartbeat, only while open", function()
 	end)
 end)
 
-T.test("tabs switch with buttons and LB / RB, selection stays friendly", function()
-	withSetup({ gamepad = true }, function(ctx)
+T.test("tabs switch with buttons and stepTab, never on a bare LB / RB press", function()
+	withSetup({ gamepad = true, overlay = { tabHints = { "R3+LB", "R3+RB" } } }, function(ctx)
 		local overlay, state, gui = ctx.overlay, ctx.state, ctx.gui
 		state.client = snapshot("client", 6)
 		overlay:setVisible(true)
 		local ui = overlay.ui
-		T.eq(ui.lbHint.Visible, true, "LB hint with a gamepad")
+		T.eq(ui.lbHint.Visible, true, "hint with a gamepad")
+		T.eq(ui.lbHint.Text, "R3+LB", "previous tab hint")
+		T.eq(ui.rbHint.Text, "R3+RB", "next tab hint")
 
 		for i, b in ui.tabButtons do
 			T.eq(b.Selectable, true, "tab selectable")
@@ -396,26 +398,37 @@ T.test("tabs switch with buttons and LB / RB, selection stays friendly", functio
 			local _ = i
 		end
 		T.eq(ui.panel.SelectionGroup, true, "panel is a selection group")
+		for _, side in { "Up", "Down", "Left", "Right" } do
+			T.check(ui.panel["SelectionBehavior" .. side] ~= Enum.SelectionBehavior.Stop, "the D-pad can leave the panel: " .. side)
+		end
 
 		ui.tabButtons[3].Activated:_fire()
 		T.eq(overlay.tab, 3, "button switches tab")
 		T.eq(ui.pages[3].Visible, true, "page shown")
 		T.eq(ui.pages[1].Visible, false, "other page hidden")
 
+		-- the panel is open while the game is played: LB and RB are the game's buttons
+		T.eq(#gui.UserInputService.InputBegan._fns, 0, "the panel listens to no key or button")
 		local function press(key)
 			gui.UserInputService.InputBegan:_fire({ KeyCode = key, UserInputType = Enum.UserInputType.Gamepad1 }, false)
 		end
 		press(Enum.KeyCode.ButtonR1)
-		T.eq(overlay.tab, 4, "RB next")
-		press(Enum.KeyCode.ButtonR1)
-		press(Enum.KeyCode.ButtonR1)
-		T.eq(overlay.tab, 1, "RB wraps")
 		press(Enum.KeyCode.ButtonL1)
-		T.eq(overlay.tab, 5, "LB wraps back")
+		T.eq(overlay.tab, 3, "a bare RB / LB does not switch tabs")
 
-		-- selection follows LB/RB when it is on the tab bar
+		-- stepTab is what the runtime calls while the combo's first button is held
+		overlay:stepTab(1)
+		T.eq(overlay.tab, 4, "next")
+		overlay:stepTab(1)
+		overlay:stepTab(1)
+		T.eq(overlay.tab, 1, "next wraps")
+		overlay:stepTab(-1)
+		T.eq(overlay.tab, 5, "previous wraps back")
+		T.eq(ui.pages[5].Visible, true, "page follows")
+
+		-- selection follows when it is on the tab bar
 		gui.GuiService.SelectedObject = ui.tabButtons[5]
-		press(Enum.KeyCode.ButtonR1)
+		overlay:stepTab(1)
 		T.eq(gui.GuiService.SelectedObject, ui.tabButtons[1], "selection moved with the tab")
 
 		ui.sideButton.Activated:_fire()
@@ -426,11 +439,37 @@ T.test("tabs switch with buttons and LB / RB, selection stays friendly", functio
 		ui.closeButton.Activated:_fire()
 		T.eq(overlay.visible, false, "closed by the x button")
 		T.eq(gui.GuiService.SelectedObject, nil, "selection cleared")
-
-		-- LB/RB do nothing while closed
-		press(Enum.KeyCode.ButtonR1)
-		T.eq(overlay.tab, 1, "no tab change while closed")
 		noErrors(ctx)
+	end)
+end)
+
+T.test("tab hints show only what the runtime binds", function()
+	withSetup({ gamepad = true }, function(ctx)
+		local overlay = ctx.overlay
+		overlay:setVisible(true)
+		local ui = overlay.ui
+		local full = ui.tabHolder.Size
+		T.eq(ui.lbHint.Visible, false, "no hints given: none shown")
+		T.eq(ui.rbHint.Visible, false)
+
+		local created = ctx.gui.created
+		overlay:setTabHints({ "L3+LB", "L3+RB" })
+		T.eq(ui.lbHint.Visible, true, "hints appear")
+		T.eq(ui.lbHint.Text, "L3+LB")
+		T.eq(ui.rbHint.Text, "L3+RB")
+		T.check(ui.tabHolder.Size ~= full, "the tab bar makes room")
+		overlay:setTabHints(nil)
+		T.eq(ui.lbHint.Visible, false, "and go again (overlayGamepadTabs = false)")
+		T.eq(ui.tabHolder.Size, full, "the tab bar is full width again")
+		overlay:setTabHints({ 1, 2 } :: any)
+		T.eq(ui.lbHint.Visible, false, "junk is no hint")
+		T.eq(ctx.gui.created, created, "no Instances made")
+		noErrors(ctx)
+	end)
+	-- no gamepad: no hints even when buttons are bound
+	withSetup({ overlay = { tabHints = { "R3+LB", "R3+RB" } } }, function(ctx)
+		ctx.overlay:setVisible(true)
+		T.eq(ctx.overlay.ui.lbHint.Visible, false, "keyboard and mouse: no hint")
 	end)
 end)
 

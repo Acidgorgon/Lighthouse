@@ -1,18 +1,24 @@
 --!strict
 -- The Lighthouse in-game panel.
 --
---   local overlay = Overlay.new(sourceFn)
+--   local overlay = Overlay.new(sourceFn, opts?)
 --   overlay:setVisible(true)  -- builds the panel on first open, then shows it
 --   overlay:setVisible(false) -- hides it (kept for the next open)
+--   overlay:stepTab(1)        -- next tab (-1: previous), wrapping
 --   overlay:destroy()
 --
 -- sourceFn(side) returns the latest Snapshot for "client" or "server" (nil when there is none yet),
 -- and sourceFn("telemetry") returns the player telemetry aggregate (nil when telemetry is off).
+-- opts.tabHints = { "R3+LB", "R3+RB" }: what to print next to the tab bar on a gamepad (nil: nothing).
 --
 -- Plain Instances only. Every Instance is created once in build(); refreshes (4 Hz, from a
 -- Heartbeat accumulator that only runs while the panel is open) only write properties, and only
--- when a value changed. Works with mouse, touch and gamepad: every button is Selectable, LB/RB
--- switch tabs, and the panel is a SelectionGroup so GuiService.SelectedObject stays inside it.
+-- when a value changed. Works with mouse, touch and gamepad: every button is Selectable and the
+-- panel is a SelectionGroup.
+--
+-- The panel listens to no key or button itself. It is open while the game is played, so a bare
+-- LB / RB (or any other button the game uses) must not act on it: Runtime/Client binds the tab
+-- buttons only while the overlay combo's first button is held, and calls stepTab.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -30,6 +36,7 @@ local S = Theme.size
 local REFRESH = 0.25 -- seconds between refreshes (4 Hz)
 local HISTORY = 120 -- bars in the frame graph
 local FLARE_ROWS = 4
+local HINT_W = 40 -- width of a tab hint ("R3+LB")
 
 local TAB_NAMES = { "Frame", "Probes", "Network", "Memory", "Players" }
 
@@ -269,6 +276,14 @@ local Overlay = {}
 Overlay.__index = Overlay
 
 export type SourceFn = (side: string) -> any
+export type Options = { tabHints: { string }? }
+
+local function hintPair(hints: any): { string }?
+	if type(hints) == "table" and type(hints[1]) == "string" and type(hints[2]) == "string" then
+		return hints
+	end
+	return nil
+end
 
 export type Overlay = typeof(setmetatable(
 	{} :: {
@@ -278,6 +293,7 @@ export type Overlay = typeof(setmetatable(
 		destroyed: boolean,
 		side: string,
 		tab: number,
+		tabHints: { string }?,
 		gui: ScreenGui?,
 		ui: any,
 		connections: { RBXScriptConnection },
@@ -294,7 +310,7 @@ export type Overlay = typeof(setmetatable(
 	Overlay
 ))
 
-function Overlay.new(sourceFn: SourceFn): Overlay
+function Overlay.new(sourceFn: SourceFn, opts: Options?): Overlay
 	return setmetatable({
 		source = sourceFn,
 		visible = false,
@@ -302,6 +318,7 @@ function Overlay.new(sourceFn: SourceFn): Overlay
 		destroyed = false,
 		side = "client",
 		tab = 1,
+		tabHints = hintPair(opts and opts.tabHints),
 		gui = nil,
 		ui = {},
 		connections = {},
@@ -494,11 +511,9 @@ function Overlay._build(self: Overlay)
 		BorderSizePixel = 0,
 		Size = UDim2.fromOffset(S.DESIGN_W, panelH),
 		Active = true, -- clicks and touches on the panel do not fall through to the game
+		-- A group, so the D-pad prefers the panel's own controls, but never Stop at its edges: a
+		-- selection that wandered in from the game's menu must be able to leave again.
 		SelectionGroup = true,
-		SelectionBehaviorUp = Enum.SelectionBehavior.Stop,
-		SelectionBehaviorDown = Enum.SelectionBehavior.Stop,
-		SelectionBehaviorLeft = Enum.SelectionBehavior.Stop,
-		SelectionBehaviorRight = Enum.SelectionBehavior.Stop,
 	}, gui)
 	corner(panel, S.corner)
 	make("UIStroke", { Color = C.stroke, Transparency = C.strokeTransparency, Thickness = 1 }, panel)
@@ -537,7 +552,7 @@ function Overlay._build(self: Overlay)
 	ui.closeButton.AnchorPoint = Vector2.new(1, 0)
 	ui.closeButton.Position = UDim2.new(1, -S.pad, 0, 4)
 
-	-- Tab bar with LB / RB hints for gamepads.
+	-- Tab bar with the previous / next tab hints for gamepads.
 	local tabBar = make("Frame", {
 		Name = "Tabs",
 		BackgroundTransparency = 1,
@@ -546,24 +561,22 @@ function Overlay._build(self: Overlay)
 	}, panel)
 	ui.lbHint = textLabel(tabBar, {
 		Name = "LB",
-		Text = "LB",
 		Font = F.bold,
 		TextSize = T.small,
 		TextColor3 = C.dim,
 		TextXAlignment = Enum.TextXAlignment.Center,
-		Size = UDim2.new(0, 24, 1, 0),
+		Size = UDim2.new(0, HINT_W, 1, 0),
 		Visible = false,
 	})
 	ui.rbHint = textLabel(tabBar, {
 		Name = "RB",
-		Text = "RB",
 		Font = F.bold,
 		TextSize = T.small,
 		TextColor3 = C.dim,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.new(0, 24, 1, 0),
+		Size = UDim2.new(0, HINT_W, 1, 0),
 		Visible = false,
 	})
 	local tabHolder = make("Frame", {
@@ -640,18 +653,6 @@ function Overlay._build(self: Overlay)
 	end))
 	table.insert(self.connections, ui.closeButton.Activated:Connect(function()
 		self:setVisible(false)
-	end))
-	table.insert(self.connections, UserInputService.InputBegan:Connect(function(input: InputObject)
-		if not self.visible then
-			return
-		end
-		local key = input.KeyCode
-		if key == Enum.KeyCode.ButtonL1 or key == Enum.KeyCode.ButtonR1 then
-			if UserInputService:GetFocusedTextBox() then
-				return
-			end
-			self:setTab(self.tab + (if key == Enum.KeyCode.ButtonL1 then -1 else 1))
-		end
 	end))
 
 	self.built = true
@@ -794,17 +795,21 @@ end
 
 function Overlay._layoutTabs(self: Overlay)
 	local ui = self.ui
-	local hints = UserInputService.GamepadEnabled == true
-	if hints == ui.hints and ui.hintsSet then
+	local texts = self.tabHints
+	local hints = texts ~= nil and UserInputService.GamepadEnabled == true
+	if hints == ui.hints and texts == ui.hintTexts and ui.hintsSet then
 		return
 	end
 	ui.hints = hints
+	ui.hintTexts = texts
 	ui.hintsSet = true
 	ui.lbHint.Visible = hints
 	ui.rbHint.Visible = hints
-	if hints then
-		ui.tabHolder.Position = UDim2.fromOffset(28, 0)
-		ui.tabHolder.Size = UDim2.new(1, -56, 1, 0)
+	if hints and texts then
+		self:_text(ui.lbHint, texts[1])
+		self:_text(ui.rbHint, texts[2])
+		ui.tabHolder.Position = UDim2.fromOffset(HINT_W + 4, 0)
+		ui.tabHolder.Size = UDim2.new(1, -2 * (HINT_W + 4), 1, 0)
 	else
 		ui.tabHolder.Position = UDim2.fromOffset(0, 0)
 		ui.tabHolder.Size = UDim2.fromScale(1, 1)
@@ -919,6 +924,18 @@ function Overlay.setTab(self: Overlay, index: number)
 	end
 	if self.visible then
 		self:refresh()
+	end
+end
+
+function Overlay.stepTab(self: Overlay, delta: number)
+	self:setTab(self.tab + delta)
+end
+
+-- The gamepad hints next to the tab bar: { previous, next }, or nil for none.
+function Overlay.setTabHints(self: Overlay, hints: { string }?)
+	self.tabHints = hintPair(hints)
+	if self.built and not self.destroyed then
+		self:_layoutTabs()
 	end
 end
 

@@ -7,20 +7,97 @@ The overlay is an in-game panel with Lighthouse's live numbers. It is built from
 
 | Input | Action |
 |---|---|
-| **F8** | toggle (keyboard; change it with `overlayKey`) |
-| **L3 + R3** | toggle: press both thumbsticks together (change it with `overlayGamepad`) |
+| **;** (semicolon) | toggle (keyboard; change it with `overlayKey`) |
+| hold **R3**, press **D-pad Left** | toggle (controller; change it with `overlayGamepad`) |
 | **x** button | close |
 | `Lighthouse.overlay(true \| false \| nil)` | show, hide or toggle from code |
 
 ```lua
 Lighthouse.start({
-	overlayKey = Enum.KeyCode.F8,                                     -- the default; or false for no key
-	overlayGamepad = { Enum.KeyCode.ButtonL3, Enum.KeyCode.ButtonR3 }, -- or false
+	overlayKey = Enum.KeyCode.Semicolon,                               -- the default; or false for no key
+	overlayGamepad = { Enum.KeyCode.ButtonR3, Enum.KeyCode.DPadLeft }, -- hold, press; or false for no controller input
+	overlayGamepadTabs = true,                                         -- hold R3 + LB / RB switch tabs; or false
+	overlayGamepadPriority = Enum.ContextActionPriority.High.Value,    -- 3000: where the combo binds
 })
 ```
 
 The panel is built the first time it opens and only hidden when it closes. While it is closed it
 costs nothing.
+
+## Input the overlay takes
+
+The panel is meant to stay open while the game is played, so it takes as little input as it can:
+
+| Input | Taken from the game |
+|---|---|
+| Keyboard | only the toggle key, and never while a TextBox has focus |
+| Controller | only while the combo's first button is held: the second button, and LB / RB while the panel is open |
+| Mouse and touch | clicks, touches and the scroll wheel on the panel itself; use **move** when it covers your UI |
+
+Everything else reaches the game as if Lighthouse were not there. A bare LB or RB never switches
+tabs.
+
+### The keyboard key
+
+The default is **;** because the function keys are taken on one side or the other:
+
+| Key | Taken by |
+|---|---|
+| F5, F7, F8 | Studio: Play, Start and Run. Studio acts on them during a play test, and F7 arrives marked as processed, so a toggle on it never fired |
+| F9, F11, F12 | the developer console, full screen and video recording |
+| `/`, backtick, `.`, backslash, Tab, Esc | chat, the backpack, the emotes menu, UI selection, the player list, the menu |
+
+Neither Studio nor the Roblox client binds `;`, so one default works in both. A key press that the
+engine marks as processed is ignored, and so is any press while a TextBox has focus: typing `;`
+into chat or a search field never opens the panel.
+
+Pass your own key if your game or an admin script uses `;`, or if `;` is not a key of its own on
+your keyboard layout:
+
+```lua
+Lighthouse.start({ overlayKey = Enum.KeyCode.L })
+```
+
+### The controller combo
+
+`overlayGamepad = { hold, press }`: hold the first button, press the second. The default is
+**R3 + D-pad Left**: one button for each thumb, and R3 is rarely held, so play does not hit it by
+accident. (Pressing them the other way round works too.)
+
+- **The second button is sunk.** While the first button is held, Lighthouse binds the second
+  through `ContextActionService` at `overlayGamepadPriority` and sinks its press and its release,
+  so the action your game has on that button does not fire. `UserInputService.InputBegan` still
+  reports the press, with `gameProcessedEvent = true`. The bind is gone as soon as the first button
+  is released, and also when the gamepad disconnects, the window loses focus or `Lighthouse.stop()`
+  runs.
+- **The first button is not.** Its press reaches the game: when it goes down nobody can know that a
+  combo follows. Choose a first button whose press alone is harmless in your game. With Roblox's
+  default camera, R3 also steps the camera zoom.
+- **Priority.** The default is `Enum.ContextActionPriority.High.Value` (3000), above
+  `BindAction` (2000). If your game binds the second button higher than that, the combo still
+  toggles but cannot sink the press; raise `overlayGamepadPriority` above your own. The same
+  applies when the engine takes the press first, for example the D-pad for UI navigation while a
+  GuiObject is selected.
+- **Only for players who can open the overlay.** For everyone else in a live game nothing is bound
+  and nothing is sunk. A viewer's very first press in a session is not sunk either: the server has
+  not answered yet.
+- **Off.** `overlayGamepad = false` turns all controller input off: no combo, no tab buttons.
+
+A game that already passes its own two buttons keeps them:
+
+```lua
+Lighthouse.start({ overlayGamepad = { Enum.KeyCode.ButtonL3, Enum.KeyCode.ButtonR3 } })
+```
+
+### Tabs on a controller
+
+Hold the combo's first button and press **LB** or **RB** (R3 + LB / R3 + RB by default) for the
+previous or next tab. The two are bound and sunk exactly like the combo, only while the panel is
+open, so the game does not see them; the tab bar shows the hint. A shoulder button that is already
+down when you press R3 stays with the game for that hold.
+
+`overlayGamepadTabs = false` turns the tab buttons off. They are also off when the combo itself
+uses LB or RB. Tabs stay reachable with the D-pad (see below), the mouse and touch.
 
 ## Tabs
 
@@ -42,11 +119,12 @@ between this client's numbers and the server's.
 
 Every control works with each input:
 
-- **Controller.** LB and RB switch tabs at any time while the panel is open, without taking focus
-  from the game. To use the buttons, enter UI navigation (the Select or View button on most
-  controllers), move with the D-pad and press A. Selection stays inside the panel while you
-  navigate. Select a list and use the right stick to scroll it. Closing the panel gives focus back
-  to the game.
+- **Controller.** Hold R3 and press LB or RB to switch tabs without taking focus from the game
+  ([Tabs on a controller](#tabs-on-a-controller)). To use the buttons, enter UI navigation (the
+  Select or View button on most controllers), move with the D-pad and press A. The D-pad prefers
+  the panel's own controls while the selection is inside it, and can always leave it again for
+  your game's UI. Select a list and use the right stick to scroll it. Closing the panel clears a
+  selection that was inside it.
 - **Touch.** Tabs and buttons are bigger on touch screens. Lists scroll with a swipe.
 - **Mouse.** Click a tab or button, scroll lists with the wheel.
 

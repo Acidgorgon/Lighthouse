@@ -19,8 +19,11 @@ export default defineConfig({
       { text: 'Viewer', link: '/viewer' },
       shared.nav,
       {
-        text: 'v0.1.0',
-        items: [{ text: 'Releases', link: 'https://github.com/Acidgorgon/Lighthouse/releases' }],
+        text: 'v0.2.0',
+        items: [
+          { text: 'Changelog', link: '/changelog' },
+          { text: 'Releases', link: 'https://github.com/Acidgorgon/Lighthouse/releases' },
+        ],
       },
     ],
 
@@ -39,7 +42,10 @@ export default defineConfig({
       },
       {
         text: 'Reference',
-        items: [{ text: 'API', link: '/reference/api' }],
+        items: [
+          { text: 'API', link: '/reference/api' },
+          { text: 'Changelog', link: '/changelog' },
+        ],
       },
       {
         text: 'Tools',

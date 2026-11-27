@@ -29,12 +29,15 @@ previous ones and applies them. Returns `true` when Lighthouse is on, `false` wh
 | `frames` | number | `600` | both | frames kept in the history ring |
 | `microprofiler` | boolean | `RunService:IsStudio()` | both | also call `debug.profilebegin` / `profileend` with each probe's name |
 | `viewers` | function or table | creator | server | who may see server numbers and open the overlay in live games: `function(player): boolean`, a list of user ids, or `{ group = id, rank = n }`. Everyone in Studio |
-| `overlayKey` | `Enum.KeyCode` or `false` | `F8` | client | keyboard toggle |
-| `overlayGamepad` | `{ KeyCode, KeyCode }` or `false` | `{ ButtonL3, ButtonR3 }` | client | press both to toggle |
+| `overlayKey` | `Enum.KeyCode` or `false` | `Semicolon` | client | keyboard toggle; ignored while a TextBox has focus. `false`: no key |
+| `overlayGamepad` | `{ KeyCode, KeyCode }` or `false` | `{ ButtonR3, DPadLeft }` | client | controller toggle: hold the first, press the second. The second is bound through `ContextActionService` while the first is held, and sunk. `false`: no controller input at all |
+| `overlayGamepadTabs` | boolean | `true` | client | hold `overlayGamepad[1]` and press LB / RB for the previous / next tab while the panel is open (sunk). `false`: off. A bare LB / RB never switches tabs |
+| `overlayGamepadPriority` | number or `Enum.ContextActionPriority` | `3000` (`High`) | client | priority the combo and the tab buttons are bound at |
 | `telemetry` | boolean or table | `false` | server | `true` or `{ sample = 0.1, every = 60, analytics = true, http = nil }`, see [telemetry](/guide/telemetry) |
 | `stream` | number | `1` | server | seconds between server snapshots sent to viewers |
 
 The default viewer is the game's creator, or for a group game, rank 255 in the owning group.
+[Input the overlay takes](/guide/overlay#input-the-overlay-takes) explains the overlay options.
 
 ```lua
 Lighthouse.start({
@@ -228,7 +231,7 @@ Lighthouse.onReport(fn: (report: Report) -> ())
 
 | Member | Meaning |
 |---|---|
-| `Lighthouse.version` | `"0.1.0"` |
+| `Lighthouse.version` | `"0.2.0"` ([changelog](/changelog)) |
 | `Lighthouse.isServer` | `true` on the server |
 | `Lighthouse.histogram()` | a new log-bucket histogram object (`:add(ms)`, `:merge(other)`, `:quantile(q)`) |
 | `Lighthouse.Core` | the pure Luau core, for tests and tools |

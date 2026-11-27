@@ -27,7 +27,8 @@ Lighthouse.count("Pathfinds")       -- per second
 Lighthouse.gauge("Npcs", #npcs)     -- last value
 ```
 
-Press **F8** (or **L3 + R3** on a controller) to open the overlay.
+Press **;** (or hold **R3** and press **D-pad Left** on a controller) to open the overlay. Both
+can be changed or turned off, and the controller buttons reach your game untouched unless R3 is held.
 
 It is part of **Harbor**, a family of Roblox libraries: **Current** (networking), **Ripple** (state
 sync), **Anchor** (saving), **Tide** (motion) and **Lighthouse** (profiling).
@@ -73,7 +74,8 @@ Lighthouse.onReport(fn)                 -- server, player telemetry
 ```
 
 Full reference: [API](https://acidgorgon.github.io/Lighthouse/reference/api). Overhead numbers:
-[Benchmarks](https://acidgorgon.github.io/Lighthouse/benchmarks).
+[Benchmarks](https://acidgorgon.github.io/Lighthouse/benchmarks). What changed between versions:
+[Changelog](https://acidgorgon.github.io/Lighthouse/changelog).
 
 ## Tests
 
