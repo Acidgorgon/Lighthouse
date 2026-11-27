@@ -511,11 +511,9 @@ function Overlay._build(self: Overlay)
 		BorderSizePixel = 0,
 		Size = UDim2.fromOffset(S.DESIGN_W, panelH),
 		Active = true, -- clicks and touches on the panel do not fall through to the game
+		-- A group, so the D-pad prefers the panel's own controls, but never Stop at its edges: a
+		-- selection that wandered in from the game's menu must be able to leave again.
 		SelectionGroup = true,
-		SelectionBehaviorUp = Enum.SelectionBehavior.Stop,
-		SelectionBehaviorDown = Enum.SelectionBehavior.Stop,
-		SelectionBehaviorLeft = Enum.SelectionBehavior.Stop,
-		SelectionBehaviorRight = Enum.SelectionBehavior.Stop,
 	}, gui)
 	corner(panel, S.corner)
 	make("UIStroke", { Color = C.stroke, Transparency = C.strokeTransparency, Thickness = 1 }, panel)

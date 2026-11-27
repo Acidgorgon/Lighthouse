@@ -398,6 +398,9 @@ T.test("tabs switch with buttons and stepTab, never on a bare LB / RB press", fu
 			local _ = i
 		end
 		T.eq(ui.panel.SelectionGroup, true, "panel is a selection group")
+		for _, side in { "Up", "Down", "Left", "Right" } do
+			T.check(ui.panel["SelectionBehavior" .. side] ~= Enum.SelectionBehavior.Stop, "the D-pad can leave the panel: " .. side)
+		end
 
 		ui.tabButtons[3].Activated:_fire()
 		T.eq(overlay.tab, 3, "button switches tab")
